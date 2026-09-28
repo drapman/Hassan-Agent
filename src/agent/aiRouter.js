@@ -18,10 +18,21 @@ async function callGroq(prompt, systemInstruction = '', messages = null) {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) throw new Error('GROQ_API_KEY تنظیم نشده است');
 
-    const formattedMessages = messages || [
-        ...(systemInstruction ? [{ role: 'system', content: systemInstruction }] : []),
-        { role: 'user', content: prompt }
-    ];
+    let formattedMessages = [];
+    if (messages && Array.isArray(messages) && messages.length > 0) {
+        formattedMessages = messages.map(m => ({
+            role: m.role === 'model' ? 'assistant' : m.role,
+            content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        }));
+        if (systemInstruction && !formattedMessages.some(m => m.role === 'system')) {
+            formattedMessages.unshift({ role: 'system', content: systemInstruction });
+        }
+    } else {
+        formattedMessages = [
+            ...(systemInstruction ? [{ role: 'system', content: systemInstruction }] : []),
+            { role: 'user', content: prompt }
+        ];
+    }
 
     const models = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
     let lastErr = null;
@@ -49,6 +60,7 @@ async function callGroq(prompt, systemInstruction = '', messages = null) {
             if (text) return { text, provider: `Groq (${model})` };
         } catch (err) {
             lastErr = err;
+            console.warn(`Groq (${model}) error:`, err.response?.data?.error?.message || err.message);
         }
     }
     throw lastErr || new Error('خطا در ارتباط با Groq');
@@ -61,10 +73,21 @@ async function callOpenRouter(prompt, systemInstruction = '', messages = null) {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error('OPENROUTER_API_KEY تنظیم نشده است');
 
-    const formattedMessages = messages || [
-        ...(systemInstruction ? [{ role: 'system', content: systemInstruction }] : []),
-        { role: 'user', content: prompt }
-    ];
+    let formattedMessages = [];
+    if (messages && Array.isArray(messages) && messages.length > 0) {
+        formattedMessages = messages.map(m => ({
+            role: m.role === 'model' ? 'assistant' : m.role,
+            content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        }));
+        if (systemInstruction && !formattedMessages.some(m => m.role === 'system')) {
+            formattedMessages.unshift({ role: 'system', content: systemInstruction });
+        }
+    } else {
+        formattedMessages = [
+            ...(systemInstruction ? [{ role: 'system', content: systemInstruction }] : []),
+            { role: 'user', content: prompt }
+        ];
+    }
 
     const models = [
         'deepseek/deepseek-chat',
@@ -98,6 +121,7 @@ async function callOpenRouter(prompt, systemInstruction = '', messages = null) {
             if (text) return { text, provider: `OpenRouter (${model})` };
         } catch (err) {
             lastErr = err;
+            console.warn(`OpenRouter (${model}) error:`, err.response?.data?.error?.message || err.message);
         }
     }
     throw lastErr || new Error('خطا در ارتباط با OpenRouter');
@@ -122,11 +146,41 @@ async function callGemini(prompt, systemInstruction = '', messages = null) {
     let lastErr = null;
 
     let contents = prompt;
+    let effectiveSystemInstruction = systemInstruction;
+
     if (messages && Array.isArray(messages) && messages.length > 0) {
-        contents = messages.map(m => ({
-            role: m.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: m.content }]
-        }));
+        // جداسازی پیام‌های system و حفظ آنها در effectiveSystemInstruction
+        const nonSystem = [];
+        for (const m of messages) {
+            if (m.role === 'system') {
+                effectiveSystemInstruction = m.content || effectiveSystemInstruction;
+            } else {
+                nonSystem.push(m);
+            }
+        }
+
+        // رعایت ساختار نوبتی user و model مورد نیاز Gemini
+        contents = [];
+        let lastRole = null;
+        for (const m of nonSystem) {
+            const role = m.role === 'assistant' ? 'model' : 'user';
+            const text = (m.content || '').trim();
+            if (!text) continue;
+
+            if (role === lastRole) {
+                contents[contents.length - 1].parts[0].text += '\n' + text;
+            } else {
+                contents.push({
+                    role,
+                    parts: [{ text }]
+                });
+                lastRole = role;
+            }
+        }
+
+        if (contents.length > 0 && contents[0].role !== 'user') {
+            contents.unshift({ role: 'user', parts: [{ text: 'سلام' }] });
+        }
     }
 
     for (const model of models) {
@@ -135,7 +189,7 @@ async function callGemini(prompt, systemInstruction = '', messages = null) {
                 model,
                 contents,
                 config: {
-                    systemInstruction: systemInstruction || undefined,
+                    systemInstruction: effectiveSystemInstruction || undefined,
                     temperature: 0.7,
                 },
             });
@@ -144,6 +198,7 @@ async function callGemini(prompt, systemInstruction = '', messages = null) {
             if (text) return { text, provider: `Gemini (${model})` };
         } catch (err) {
             lastErr = err;
+            console.warn(`Gemini (${model}) error:`, err.message);
         }
     }
     throw lastErr || new Error('خطا در ارتباط با Gemini');
