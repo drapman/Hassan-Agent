@@ -105,6 +105,7 @@ async function callOpenRouter(prompt, systemInstruction = '', messages = null) {
                     model,
                     messages: formattedMessages,
                     temperature: 0.7,
+                    max_tokens: 1500
                 },
                 {
                     headers: {
