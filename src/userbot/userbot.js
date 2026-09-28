@@ -109,6 +109,15 @@ async function startUserbot(botInstance = null) {
                 sessionData.lastTime = now;
                 sessionData.messageCount++;
 
+                // اگر پیام اول مخاطب است، بلافاصله به پوریا اطلاع بده
+                if (isFirstMessage && botInstance && process.env.TELEGRAM_OWNER_ID) {
+                    const initialAlert = `🔔 *پیام جدید در پی‌وی شما!*\n\n` +
+                        `👤 *از طرف:* ${senderName}\n` +
+                        `💬 *متن پیام:* "${messageText}"\n\n` +
+                        `⏳ _حسن در حال گفتگو با مخاطب است. پس از پایان چت، خلاصه هدف و پیامش برای شما ارسال می‌شود._`;
+                    botInstance.telegram.sendMessage(process.env.TELEGRAM_OWNER_ID, initialAlert, { parse_mode: 'Markdown' }).catch(() => {});
+                }
+
                 // ساخت پرامپت هوشمند منشی پویا
                 const systemInstruction = `تو «حسن» هستی؛ دستیار و منشی شخصی بسیار باهوش، گرم، لوتی و مودب «پوریا» در اکانت تلگرامش.
 پوریا در حال حاضر آنلاین نیست یا سرش شلوغ است و تو وظیفه داری با این مخاطب چت کنی تا بفهمی کارش چیه، نیازش چیه و پیام یا درخواستش را ثبت کنی تا دقیق به پوریا انتقال دهی.
@@ -151,16 +160,18 @@ async function startUserbot(botInstance = null) {
                 // ارسال پاسخ به پی‌وی مخاطب
                 try {
                     await client.sendMessage(senderId, { message: autoReply });
-                    console.log(`🤖 [منشی شخصی] پاسخ مرحله ${sessionData.messageCount} به ${senderName} ارسال شد.`);
+                    console.log(`🤖 [منشی شخصی] پاسخ به ${senderName} ارسال شد.`);
                 } catch (sendErr) {
                     console.error('❌ خطا در ارسال پیام منشی:', sendErr.message);
                 }
 
-                // ارسال گزارش زنده به خود مالک در ربات دستیار
-                if (botInstance && process.env.TELEGRAM_OWNER_ID) {
-                    const alertMsg = `📢 *مکالمه منشی با ${senderName}:*\n\n💬 *پیام مخاطب:* "${messageText}"\n🤖 *پاسخ حسن:* "${autoReply}"\n\n_(مرحله ${sessionData.messageCount} مکالمه)_`;
-                    await botInstance.telegram.sendMessage(process.env.TELEGRAM_OWNER_ID, alertMsg, { parse_mode: 'Markdown' }).catch(() => {});
+                // تنظیم تایمر هوشمند برای تشخیص پایان گفتگو (۲ دقیقه سکوت مخاطب = پایان چت)
+                if (sessionData.summaryTimer) {
+                    clearTimeout(sessionData.summaryTimer);
                 }
+                sessionData.summaryTimer = setTimeout(async () => {
+                    await sendChatSummary(botInstance, senderId, senderName, sessionData);
+                }, 2 * 60 * 1000);
 
             } catch (err) {
                 console.error('❌ خطا در رویداد پیام منشی:', err.message);
@@ -174,4 +185,44 @@ async function startUserbot(botInstance = null) {
     }
 }
 
+/**
+ * ارسال گزارش و خلاصه گفتگوی منشی به تلگرام پوریا پس از پایان چت
+ */
+async function sendChatSummary(botInstance, senderId, senderName, sessionData) {
+    if (!botInstance || !process.env.TELEGRAM_OWNER_ID) return;
+    if (!sessionData || !sessionData.history || sessionData.history.length <= 1) return;
+
+    try {
+        console.log(`📝 در حال تحلیل و ساخت خلاصه گفتگوی منشی با ${senderName}...`);
+
+        const chatLog = sessionData.history
+            .map(m => `${m.role === 'user' ? senderName : 'حسن (منشی)'}: ${m.content}`)
+            .join('\n');
+
+        const summaryPrompt = `گفتگوی زیر بین یک مخاطب به نام (${senderName}) و منشی هوشمند (${'حسن'}) در تلگرام پوریا انجام شده است:
+${chatLog}
+
+یک خلاصه بسیار مرتب، شفاف و شسته‌رفته در ۲ الی ۳ خط بنویس که دقیقاً بگوید:
+۱. موضوع و هدف اصلی مخاطب چی بود؟
+۲. در نهایت چه نتیجه‌ای حاصل شد یا چه پیامی/درخواستی برای پوریا گذاشت؟
+لحن خلاصه کاملاً واضح، خلاصه، محترمانه و مفید باشد.`;
+
+        const summary = await askAI({
+            prompt: summaryPrompt,
+            systemInstruction: 'تو دستیار گزارش‌دهی پوریا هستی. خلاصه گفتگوی تلگرام را بسیار تمیز، مختصر و مفید بنویس.'
+        });
+
+        const reportMsg = `📋 *گزارش پایان گفتگو با ${senderName}*\n\n` +
+            `🎯 *خلاصه هدف و نتیجه گفتگو:*\n${summary.trim()}\n\n` +
+            `💬 *تعداد تبادل پیام:* ${Math.ceil(sessionData.history.length / 2)}\n` +
+            `🕒 *زمان اتمام:* ${new Date().toLocaleTimeString('fa-IR', { timeZone: 'Asia/Tehran' })}`;
+
+        await botInstance.telegram.sendMessage(process.env.TELEGRAM_OWNER_ID, reportMsg, { parse_mode: 'Markdown' });
+        console.log(`✅ خلاصه گفتگوی منشی با ${senderName} برای پوریا ارسال شد.`);
+    } catch (err) {
+        console.error('❌ خطا در ارسال خلاصه گفتگو:', err.message);
+    }
+}
+
 module.exports = { startUserbot };
+
