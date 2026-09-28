@@ -10,6 +10,8 @@ const { StringSession } = require('telegram/sessions');
 const { NewMessage } = require('telegram/events');
 const { askAI } = require('../agent/aiRouter');
 const { contacts } = require('../database/db');
+const { transcribeAudio, textToSpeech } = require('../tools/voiceTools');
+const { CustomFile } = require('telegram/client/uploads');
 
 const apiId = 2040;
 const apiHash = 'b18441a1ff607e10a989891a5462e627';
@@ -71,14 +73,47 @@ async function startUserbot(botInstance = null) {
                 const senderFirstName = sender.firstName || '';
                 const senderLastName = sender.lastName || '';
                 const senderName = senderFirstName || senderUsername || 'یک مخاطب';
-                const messageText = (message.text || '').trim();
+
+                const isVoice = !!(message.voice || message.audio);
+                let messageText = (message.text || '').trim();
+                let isVoiceMessage = false;
+
+                // اگر پیام ویس یا صوتی بود، فایل را دانلود و تبدیل به متن فارسی می‌کنیم
+                if (isVoice) {
+                    try {
+                        console.log(`🎙️ [پی‌وی شخصی] ویس دریافتی از ${senderName}، در حال دریافت و پیاده‌سازی متن...`);
+                        const audioBuffer = await client.downloadMedia(message);
+                        if (audioBuffer && audioBuffer.length > 0) {
+                            const transcribed = await transcribeAudio(audioBuffer, 'audio/ogg');
+                            if (transcribed && transcribed.trim()) {
+                                messageText = transcribed.trim();
+                                isVoiceMessage = true;
+                                console.log(`🎙️ متن ویس استخراج‌شده از ${senderName}: "${messageText}"`);
+                            }
+                        }
+                    } catch (voiceErr) {
+                        console.warn('⚠️ خطا در دریافت یا تبدیل ویس پی‌وی:', voiceErr.message);
+                    }
+                }
 
                 // فیلترهای حیاتی:
                 // ۲. نادیده گرفتن تمام ربات‌ها (جلوگیری از لوپ بی‌پایان با ربات خودمان یا ربات‌های دیگر)
                 if (sender.bot || senderId === ourBotId) return;
 
                 // ۳. نادیده گرفتن پیام‌های ارسالی از خودمان، ذخیره پیام‌ها (Saved Messages) و تلگرام رسمی
-                if (senderId === myId || senderId === '777000' || !messageText) return;
+                if (senderId === myId || senderId === '777000') return;
+
+                // اگر ویس بود ولی متنش استخراج نشد
+                if (isVoice && !messageText) {
+                    try {
+                        await client.sendMessage(senderId, {
+                            message: 'سلام مخلصم! داداش صدات رو نتونستم واضح بشنوم یا کیفیتش پایین بود، بی زحمت دوباره بفرست یا برام بنویس ببینم چی شده!'
+                        });
+                    } catch { /* ignore */ }
+                    return;
+                }
+
+                if (!messageText) return;
 
                 // ۴. ذخیره مشخصات کاربر در حافظه دیتابیس SQLite
                 try {
@@ -87,7 +122,7 @@ async function startUserbot(botInstance = null) {
                         username: senderUsername,
                         first_name: senderFirstName,
                         last_name: senderLastName,
-                        last_message: messageText
+                        last_message: isVoiceMessage ? `[ویس]: ${messageText}` : messageText
                     });
                 } catch (e) {
                     console.warn('⚠️ خطا در ذخیره مخاطب در دیتابیس:', e.message);
@@ -113,12 +148,14 @@ async function startUserbot(botInstance = null) {
                         lastTime: now,
                         messageCount: 0,
                         senderName,
-                        senderUsername
+                        senderUsername,
+                        hasVoice: isVoiceMessage
                     };
                     userSessions.set(senderId, sessionData);
                 } else {
                     sessionData.senderName = senderName;
                     sessionData.senderUsername = senderUsername;
+                    if (isVoiceMessage) sessionData.hasVoice = true;
                 }
 
                 // بررسی سقف پیام‌ها در یک جلسه (برای جلوگیری از سوءاستفاده یا اسپم بی‌پایان)
@@ -126,7 +163,7 @@ async function startUserbot(botInstance = null) {
                     return; // بیشتر از ۸ رفت و برگشت سکوت کن تا خود پوریا ببیند
                 }
 
-                console.log(`📩 [پی‌وی شخصی] پیام جدید از ${senderName} (@${senderUsername || 'بدون_یوزرنیم'}): "${messageText}"`);
+                console.log(`📩 [پی‌وی شخصی] پیام جدید (${isVoiceMessage ? 'صوتی' : 'متنی'}) از ${senderName} (@${senderUsername || 'بدون_یوزرنیم'}): "${messageText}"`);
 
                 const isFirstMessage = sessionData.history.length === 0;
 
@@ -138,12 +175,12 @@ async function startUserbot(botInstance = null) {
                 // اگر پیام اول مخاطب است، بلافاصله به پوریا اطلاع بده
                 if (isFirstMessage && botInstance && process.env.TELEGRAM_OWNER_ID) {
                     const userDisplay = senderUsername ? `@${senderUsername}` : 'ندارد';
-                    const initialAlert = `🔔 *پیام جدید در پی‌وی شما!*\n\n` +
+                    const initialAlert = `${isVoiceMessage ? '🎙️ *ویس جدید در پی‌وی شما!*' : '🔔 *پیام جدید در پی‌وی شما!*'}\n\n` +
                         `👤 *نام:* ${senderName}\n` +
                         `🆔 *آیدی عددی:* \`${senderId}\`\n` +
                         `🌐 *یوزرنیم:* ${userDisplay}\n` +
-                        `💬 *متن پیام:* "${messageText}"\n\n` +
-                        `⏳ _حسن با شوخ‌طبعی در حال چت با مخاطب است. پس از پایان گفتگو، خلاصه کامل برای شما ارسال می‌شود._`;
+                        `💬 *${isVoiceMessage ? 'متن ویس مخاطب' : 'متن پیام'}:* "${messageText}"\n\n` +
+                        `⏳ _حسن ${isVoiceMessage ? 'به صورت صوتی (Voice Note)' : 'با شوخ‌طبعی'} در حال چت با مخاطب است. پس از پایان گفتگو، خلاصه کامل برای شما ارسال می‌شود._`;
                     botInstance.telegram.sendMessage(process.env.TELEGRAM_OWNER_ID, initialAlert, { parse_mode: 'Markdown' }).catch(() => {});
                 }
 
@@ -192,12 +229,37 @@ async function startUserbot(botInstance = null) {
                 // ثبت پاسخ منشی در تاریخچه
                 sessionData.history.push({ role: 'assistant', content: autoReply });
 
-                // ارسال پاسخ به پی‌وی مخاطب
-                try {
-                    await client.sendMessage(senderId, { message: autoReply });
-                    console.log(`🤖 [منشی شخصی] پاسخ مرحله ${count} به ${senderName} ارسال شد.`);
-                } catch (sendErr) {
-                    console.error('❌ خطا در ارسال پیام منشی:', sendErr.message);
+                // بررسی نیاز به پاسخ صوتی (اگر مخاطب ویس فرستاده بود یا درخواست ویس کرده بود)
+                const wantsVoiceReply = isVoiceMessage || /ویس|صوتی|بخون|بگو|voice/i.test(messageText);
+
+                // ارسال پاسخ به پی‌وی مخاطب (صوتی به عنوان Voice Note یا متنی)
+                let voiceSent = false;
+                if (wantsVoiceReply) {
+                    try {
+                        console.log(`🔊 [منشی شخصی] در حال تولید ویس با صدای فرید برای ${senderName}...`);
+                        const voiceBuffer = await textToSpeech(autoReply);
+                        if (voiceBuffer && voiceBuffer.length > 500) {
+                            const voiceFile = new CustomFile('voice.mp3', voiceBuffer.length, '', voiceBuffer);
+                            await client.sendFile(senderId, {
+                                file: voiceFile,
+                                voiceNote: true,
+                                caption: autoReply
+                            });
+                            voiceSent = true;
+                            console.log(`🎙️ [منشی شخصی] پاسخ صوتی دوطرفه (Voice Note) مرحله ${count} با موفقیت به ${senderName} ارسال شد.`);
+                        }
+                    } catch (ttsErr) {
+                        console.warn('⚠️ خطا در ارسال ویس منشی، ارسال به صورت متنی:', ttsErr.message);
+                    }
+                }
+
+                if (!voiceSent) {
+                    try {
+                        await client.sendMessage(senderId, { message: autoReply });
+                        console.log(`🤖 [منشی شخصی] پاسخ متنی مرحله ${count} به ${senderName} ارسال شد.`);
+                    } catch (sendErr) {
+                        console.error('❌ خطا در ارسال پیام منشی:', sendErr.message);
+                    }
                 }
 
                 // اگر مکالمه به جمع‌بندی رسید (پیام ۴ به بعد)، زمان انتظار را کوتاه‌تر کن
@@ -259,7 +321,8 @@ ${chatLog}
         const reportMsg = `📋 *گزارش پایان گفتگو با مخاطب*\n\n` +
             `👤 *نام:* ${senderName}\n` +
             `🆔 *آیدی عددی (User ID):* \`${senderId}\`\n` +
-            `🌐 *یوزرنیم:* ${usernameText}\n\n` +
+            `🌐 *یوزرنیم:* ${usernameText}\n` +
+            `🎙️ *شیوه گفتگو:* ${sessionData.hasVoice ? 'صوتی (Voice Note) 🗣️' : 'متنی ✍️'}\n\n` +
             `🎯 *خلاصه گفتگو و خواسته مخاطب:*\n${summary.trim()}\n\n` +
             `💬 *تعداد تبادل پیام:* ${Math.ceil(sessionData.history.length / 2)}\n` +
             `🕒 *زمان اتمام:* ${new Date().toLocaleTimeString('fa-IR', { timeZone: 'Asia/Tehran' })}`;

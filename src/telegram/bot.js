@@ -197,15 +197,48 @@ bot.hears('❓ راهنما', async (ctx) => {
 });
 
 // ──────────────────────────────────────────────────
-// Main Message Handler
+// Main Message Handlers
 // ──────────────────────────────────────────────────
+const { transcribeAudio, textToSpeech } = require('../tools/voiceTools');
+const axios = require('axios');
+
 bot.on('text', async (ctx) => {
-    await handleUserMessage(ctx, ctx.message.text);
+    const text = ctx.message.text || '';
+    const wantsVoice = /ویس|صوتی|بخون|بگو|voice/i.test(text);
+    await handleUserMessage(ctx, text, wantsVoice);
 });
 
-// هندلر صدا (تبدیل متن)
-bot.on('voice', async (ctx) => {
-    await ctx.reply('🎤 متأسفانه در حال حاضر پردازش صدا پشتیبانی نمی‌شه. لطفاً متن بنویس.');
+// هندلر صدا (شنیدن ویس کاربر و پاسخ صوتی دوطرفه)
+bot.on(['voice', 'audio'], async (ctx) => {
+    const userId = ctx.from.id;
+    if (processingUsers.has(userId)) {
+        await ctx.reply('⏳ صبر کن، هنوز دارم روی پیام قبلیت کار می‌کنم...');
+        return;
+    }
+
+    try {
+        const voice = ctx.message.voice || ctx.message.audio;
+        if (!voice) return;
+
+        await ctx.sendChatAction('record_voice');
+        const fileLink = await ctx.telegram.getFileLink(voice.file_id);
+        const res = await axios.get(fileLink.href, { responseType: 'arraybuffer' });
+        const audioBuffer = Buffer.from(res.data);
+
+        const transcribedText = await transcribeAudio(audioBuffer, voice.mime_type || 'audio/ogg');
+        if (!transcribedText) {
+            await ctx.reply('🎤 متأسفانه نتونستم صدای ویس رو واضح بشنوم، بی زحمت دوباره بفرست یا تایپ کن.');
+            return;
+        }
+
+        console.log(`🎙️ ویس دریافتی از ${ctx.from.first_name}: "${transcribedText}"`);
+        await ctx.reply(`🎙️ *متن ویس شما:* "${transcribedText}"`, { parse_mode: 'Markdown' });
+
+        await handleUserMessage(ctx, transcribedText, true);
+    } catch (err) {
+        console.error('❌ خطا در پردازش ویس کاربر:', err);
+        await ctx.reply('❌ در پردازش فایل صوتی مشکلی پیش آمد.');
+    }
 });
 
 // هندلر عکس
@@ -216,7 +249,7 @@ bot.on('photo', async (ctx) => {
 // ──────────────────────────────────────────────────
 // Core Handler Function
 // ──────────────────────────────────────────────────
-async function handleUserMessage(ctx, message) {
+async function handleUserMessage(ctx, message, replyWithVoice = false) {
     const userId = ctx.from.id;
     const sessionId = `telegram_${userId}`;
 
@@ -228,10 +261,10 @@ async function handleUserMessage(ctx, message) {
 
     processingUsers.add(userId);
 
-    // نمایش وضعیت تایپ
+    // نمایش وضعیت تایپ یا ضبط صدا
     let statusMessage = null;
     try {
-        await ctx.sendChatAction('typing');
+        await ctx.sendChatAction(replyWithVoice ? 'record_voice' : 'typing');
         statusMessage = await ctx.reply('🤔 در حال بررسی...');
     } catch { /* ignore */ }
 
@@ -245,7 +278,7 @@ async function handleUserMessage(ctx, message) {
                     null,
                     statusText
                 );
-                await ctx.sendChatAction('typing');
+                await ctx.sendChatAction(replyWithVoice ? 'record_voice' : 'typing');
             } catch { /* ignore edit errors */ }
         };
 
@@ -259,7 +292,24 @@ async function handleUserMessage(ctx, message) {
             } catch { /* ignore */ }
         }
 
-        // ارسال پاسخ (با مدیریت حد کاراکتر تلگرام)
+        // اگر کاربر ویس فرستاده بود، پاسخ صوتی هم برایش بساز و بفرست
+        if (replyWithVoice) {
+            try {
+                await ctx.sendChatAction('record_voice');
+                const voiceBuffer = await textToSpeech(response);
+                if (voiceBuffer) {
+                    await ctx.replyWithVoice(
+                        { source: voiceBuffer },
+                        { caption: response.substring(0, 1024) }
+                    );
+                    return;
+                }
+            } catch (ttsErr) {
+                console.warn('⚠️ ارسال ویس با مشکل مواجه شد، ارسال متن:', ttsErr.message);
+            }
+        }
+
+        // ارسال پاسخ متنی (با مدیریت حد کاراکتر تلگرام)
         if (response.length <= 4096) {
             await ctx.replyWithMarkdown(response).catch(() => ctx.reply(response));
         } else {
