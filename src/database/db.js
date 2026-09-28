@@ -3,12 +3,7 @@
  * ذخیره حافظه مکالمات، کاربران و تاریخچه
  */
 
-let DatabaseSync;
-try {
-    DatabaseSync = require('node:sqlite').DatabaseSync;
-} catch (e) {
-    DatabaseSync = require('better-sqlite3');
-}
+const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
 

@@ -21,7 +21,6 @@
     "@google/genai": "^2.3.0",
     "@supabase/supabase-js": "^2.117.2",
     "axios": "^1.6.0",
-    "better-sqlite3": "^9.0.0",
     "cheerio": "^1.0.0",
     "dotenv": "^16.3.0",
     "imap": "^0.8.19",
@@ -31,10 +30,6 @@
     "telegraf": "^4.16.0"
   },
   "engines": {
-    "node": ">=18.0.0"
-  },
-  "allowScripts": {
-    "better-sqlite3@13.0.3": true,
-    "@google/genai@2.24.0": true
+    "node": ">=22.0.0"
   }
 }

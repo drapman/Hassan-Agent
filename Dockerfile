@@ -4,7 +4,7 @@ WORKDIR /app
 
 # نصب وابستگی‌ها
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm install --omit=dev --ignore-scripts
 
 # کپی سورس کد
 COPY . .
