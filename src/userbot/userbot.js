@@ -38,13 +38,25 @@ async function startUserbot(botInstance = null) {
         const me = await client.getMe();
         console.log(`✅ منشی اکانت شخصی فعال شد روی شماره/اکانت: ${me.firstName} (@${me.username || 'بدون یوزرنیم'})`);
 
-        // گوش دادن به پیام‌های جدید
+        const myId = me.id?.toString();
+        const botToken = process.env.TELEGRAM_BOT_TOKEN || '';
+        const ourBotId = botToken.split(':')[0];
+
+        // گوش دادن به پیام‌ها
         client.addEventHandler(async (event) => {
             try {
                 const message = event.message;
-                
-                // فقط پیام‌های خصوصی جدید (نه گروه‌ها، نه کانال‌ها و نه پیام‌هایی که خودمان می‌فرستیم)
-                if (!event.isPrivate || message.out) return;
+                if (!message) return;
+
+                // اگر خودمان به کسی پیام دادیم، زمانش را ثبت کن تا منشی در مکالمه زنده دخالت نکند
+                if (message.out) {
+                    const peerId = message.peerId?.userId?.toString();
+                    if (peerId) repliedRecently.set(peerId, Date.now());
+                    return;
+                }
+
+                // فقط پیام‌های خصوصی (نه گروه‌ها، نه کانال‌ها)
+                if (!event.isPrivate) return;
 
                 const sender = await message.getSender();
                 if (!sender) return;
@@ -53,14 +65,21 @@ async function startUserbot(botInstance = null) {
                 const senderName = sender.firstName || sender.username || 'یک مخاطب';
                 const messageText = message.text || '';
 
-                // نادیده گرفتن اعلان‌های رسمی تلگرام (777000) یا پیام‌های خالی
-                if (senderId === '777000' || !messageText.trim()) return;
+                // فیلترهای حیاتی:
+                // ۱. نادیده گرفتن تمام ربات‌ها (جلوگیری از لوپ بی‌پایان با ربات خودمان یا ربات‌های دیگر)
+                if (sender.bot || senderId === ourBotId) return;
 
-                // بررسی کول‌داون (جلوگیری از پاسخ مکرر در کمتر از ۲ دقیقه به یک نفر)
+                // ۲. نادیده گرفتن پیام‌های ارسالی از خودمان، ذخیره پیام‌ها (Saved Messages) و تلگرام رسمی
+                if (senderId === myId || senderId === '777000' || !messageText.trim()) return;
+
+                // ۳. بررسی فعال بودن قابلیت پاسخ خودکار
+                if (process.env.TELEGRAM_AUTO_REPLY === 'false') return;
+
+                // ۴. بررسی کول‌داون (حداقل ۱۰ دقیقه سکوت بین دو پاسخ خودکار به یک فرد مشخص)
                 const now = Date.now();
                 const lastTime = repliedRecently.get(senderId) || 0;
-                if (now - lastTime < 2 * 60 * 1000) {
-                    return; // قبلاً در ۲ دقیقه اخیر پاسخ داده شده
+                if (now - lastTime < 10 * 60 * 1000) {
+                    return; // قبلاً در ۱۰ دقیقه اخیر پاسخ داده شده یا شما در حال چت با او هستید
                 }
 
                 console.log(`📩 [پی‌وی شخصی] پیام جدید از ${senderName}: "${messageText}"`);
