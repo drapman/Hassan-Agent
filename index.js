@@ -31,9 +31,14 @@ async function main() {
     try {
         await startBot();
 
+        const { bot } = require('./src/telegram/bot');
+
+        // راه‌اندازی دیده‌بان زنده کاربران جدید سایت (اعلان فوری ثبت‌نام به تلگرام)
+        const { startNewUserWatcher } = require('./src/watchers/newUserWatcher');
+        startNewUserWatcher(bot);
+
         // راه‌اندازی منشی هوشمند اکانت شخصی تلگرام (Userbot)
         const { startUserbot } = require('./src/userbot/userbot');
-        const { bot } = require('./src/telegram/bot');
         await startUserbot(bot);
     } catch (error) {
         console.error('❌ خطا در راه‌اندازی:', error.message);
