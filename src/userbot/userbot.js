@@ -133,16 +133,17 @@ async function startUserbot(botInstance = null) {
 
                 const now = Date.now();
 
-                // ۶. بررسی مکالمه زنده توسط پوریا (اگر خودت پیام دادی، منشی دخالت نمی‌کنه)
+                // ۶. بررسی مکالمه زنده توسط پوریا (اگر خودت دستی پیام دادی، منشی ۳ دقیقه سکوت می‌کند تا مزاحم نشود)
                 const lastHumanChatTime = activeHumanChats.get(senderId) || 0;
-                if (now - lastHumanChatTime < 30 * 60 * 1000) {
-                    return; // پوریا اخیراً با این مخاطب چت کرده، منشی ساکت می‌ماند
+                if (now - lastHumanChatTime < 3 * 60 * 1000) {
+                    console.log(`⏳ منشی برای ${senderName} ساکت است (چون خود پوریا اخیراً در حال چت بوده).`);
+                    return;
                 }
 
                 // ۷. مدیریت سشن گفتگو (حافظه تاریخچه چت منشی با مخاطب)
                 let sessionData = userSessions.get(senderId);
-                // اگر بیش از ۱۵ دقیقه از آخرین پیام گذشته باشد، مکالمه جدید شروع می‌شود
-                if (!sessionData || (now - sessionData.lastTime > 15 * 60 * 1000)) {
+                // اگر بیش از ۱۰ دقیقه از آخرین پیام گذشته باشد، مکالمه جدید شروع می‌شود
+                if (!sessionData || (now - sessionData.lastTime > 10 * 60 * 1000)) {
                     sessionData = {
                         history: [],
                         lastTime: now,
@@ -158,9 +159,9 @@ async function startUserbot(botInstance = null) {
                     if (isVoiceMessage) sessionData.hasVoice = true;
                 }
 
-                // بررسی سقف پیام‌ها در یک جلسه (برای جلوگیری از سوءاستفاده یا اسپم بی‌پایان)
-                if (sessionData.messageCount >= 8) {
-                    return; // بیشتر از ۸ رفت و برگشت سکوت کن تا خود پوریا ببیند
+                // بررسی سقف پیام‌ها در یک جلسه (افزایش سقف به ۲۵ پیام)
+                if (sessionData.messageCount >= 25) {
+                    return;
                 }
 
                 console.log(`📩 [پی‌وی شخصی] پیام جدید (${isVoiceMessage ? 'صوتی' : 'متنی'}) از ${senderName} (@${senderUsername || 'بدون_یوزرنیم'}): "${messageText}"`);
