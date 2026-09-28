@@ -106,7 +106,7 @@ async function callOpenRouter(prompt, systemInstruction = '', messages = null) {
 /**
  * ارسال پیام به Google Gemini
  */
-async function callGemini(prompt, systemInstruction = '') {
+async function callGemini(prompt, systemInstruction = '', messages = null) {
     if (!geminiClient) {
         if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY تنظیم نشده است');
         geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -121,11 +121,19 @@ async function callGemini(prompt, systemInstruction = '') {
     ];
     let lastErr = null;
 
+    let contents = prompt;
+    if (messages && Array.isArray(messages) && messages.length > 0) {
+        contents = messages.map(m => ({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }]
+        }));
+    }
+
     for (const model of models) {
         try {
             const response = await geminiClient.models.generateContent({
                 model,
-                contents: prompt,
+                contents,
                 config: {
                     systemInstruction: systemInstruction || undefined,
                     temperature: 0.7,
@@ -145,7 +153,7 @@ async function callGemini(prompt, systemInstruction = '') {
  * تولید پاسخ هوشمند با سوییچ خودکار بین موتورها (Fallback هوشمند)
  * اولویت: Groq (سریع‌ترین) ➔ OpenRouter (تنوع بالا) ➔ Gemini (گوگل)
  */
-async function askAI({ prompt, systemInstruction = '', messages = null }) {
+async function askAI({ prompt = '', systemInstruction = '', messages = null }) {
     const providers = [];
 
     if (process.env.GROQ_API_KEY) {
@@ -155,12 +163,12 @@ async function askAI({ prompt, systemInstruction = '', messages = null }) {
         providers.push({ name: 'OpenRouter', fn: () => callOpenRouter(prompt, systemInstruction, messages) });
     }
     if (process.env.GEMINI_API_KEY) {
-        providers.push({ name: 'Gemini', fn: () => callGemini(prompt, systemInstruction) });
+        providers.push({ name: 'Gemini', fn: () => callGemini(prompt, systemInstruction, messages) });
     }
 
     // اگر هیچ کلیدی تنظیم نشده بود ولی جمینای کلید پیش‌فرض داشت
     if (providers.length === 0 && process.env.GEMINI_API_KEY) {
-        providers.push({ name: 'Gemini', fn: () => callGemini(prompt, systemInstruction) });
+        providers.push({ name: 'Gemini', fn: () => callGemini(prompt, systemInstruction, messages) });
     }
 
     let lastError = null;

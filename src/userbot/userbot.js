@@ -15,7 +15,8 @@ const apiHash = 'b18441a1ff607e10a989891a5462e627';
 const session = process.env.TELEGRAM_USER_SESSION || '';
 
 let client = null;
-const repliedRecently = new Map(); // جلوگیری از اسپم (کول‌داون برای هر کاربر)
+const userSessions = new Map(); // حافظه گفتگوی چند مرحله‌ای مخاطبان
+const activeHumanChats = new Map(); // مخاطبانی که خود پوریا با آنها چت کرده است
 
 /**
  * راه‌اندازی منشی هوشمند روی اکانت شخصی
@@ -48,14 +49,17 @@ async function startUserbot(botInstance = null) {
                 const message = event.message;
                 if (!message) return;
 
-                // اگر خودمان به کسی پیام دادیم، زمانش را ثبت کن تا منشی در مکالمه زنده دخالت نکند
+                // ۱. اگر خودمان دستی به کسی پیام دادیم، منشی در این مکالمه تا ۳۰ دقیقه سکوت کند
                 if (message.out) {
                     const peerId = message.peerId?.userId?.toString();
-                    if (peerId) repliedRecently.set(peerId, Date.now());
+                    if (peerId) {
+                        activeHumanChats.set(peerId, Date.now());
+                        userSessions.delete(peerId);
+                    }
                     return;
                 }
 
-                // فقط پیام‌های خصوصی (نه گروه‌ها، نه کانال‌ها)
+                // فقط پیام‌های خصوصی جدید (نه گروه‌ها، نه کانال‌ها)
                 if (!event.isPrivate) return;
 
                 const sender = await message.getSender();
@@ -63,59 +67,98 @@ async function startUserbot(botInstance = null) {
 
                 const senderId = sender.id?.toString();
                 const senderName = sender.firstName || sender.username || 'یک مخاطب';
-                const messageText = message.text || '';
+                const messageText = (message.text || '').trim();
 
                 // فیلترهای حیاتی:
-                // ۱. نادیده گرفتن تمام ربات‌ها (جلوگیری از لوپ بی‌پایان با ربات خودمان یا ربات‌های دیگر)
+                // ۲. نادیده گرفتن تمام ربات‌ها (جلوگیری از لوپ بی‌پایان با ربات خودمان یا ربات‌های دیگر)
                 if (sender.bot || senderId === ourBotId) return;
 
-                // ۲. نادیده گرفتن پیام‌های ارسالی از خودمان، ذخیره پیام‌ها (Saved Messages) و تلگرام رسمی
-                if (senderId === myId || senderId === '777000' || !messageText.trim()) return;
+                // ۳. نادیده گرفتن پیام‌های ارسالی از خودمان، ذخیره پیام‌ها (Saved Messages) و تلگرام رسمی
+                if (senderId === myId || senderId === '777000' || !messageText) return;
 
-                // ۳. بررسی فعال بودن قابلیت پاسخ خودکار
+                // ۴. بررسی فعال بودن قابلیت پاسخ خودکار
                 if (process.env.TELEGRAM_AUTO_REPLY === 'false') return;
 
-                // ۴. بررسی کول‌داون (حداقل ۱۰ دقیقه سکوت بین دو پاسخ خودکار به یک فرد مشخص)
                 const now = Date.now();
-                const lastTime = repliedRecently.get(senderId) || 0;
-                if (now - lastTime < 10 * 60 * 1000) {
-                    return; // قبلاً در ۱۰ دقیقه اخیر پاسخ داده شده یا شما در حال چت با او هستید
+
+                // ۵. بررسی مکالمه زنده توسط پوریا (اگر خودت پیام دادی، منشی دخالت نمی‌کنه)
+                const lastHumanChatTime = activeHumanChats.get(senderId) || 0;
+                if (now - lastHumanChatTime < 30 * 60 * 1000) {
+                    return; // پوریا اخیراً با این مخاطب چت کرده، منشی ساکت می‌ماند
                 }
 
-                console.log(`📩 [پی‌وی شخصی] پیام جدید از ${senderName}: "${messageText}"`);
+                // ۶. مدیریت سشن گفتگو (حافظه تاریخچه چت منشی با مخاطب)
+                let sessionData = userSessions.get(senderId);
+                // اگر بیش از ۱۵ دقیقه از آخرین پیام گذشته باشد، مکالمه جدید شروع می‌شود
+                if (!sessionData || (now - sessionData.lastTime > 15 * 60 * 1000)) {
+                    sessionData = { history: [], lastTime: now, messageCount: 0 };
+                    userSessions.set(senderId, sessionData);
+                }
 
-                // تولید پاسخ هوشمندانه با هوش مصنوعی (سوئیچ خودکار بین Groq, OpenRouter, Gemini)
+                // بررسی سقف پیام‌ها در یک جلسه (برای جلوگیری از سوءاستفاده یا اسپم بی‌پایان)
+                if (sessionData.messageCount >= 7) {
+                    return; // بیشتر از ۷ رفت و برگشت سکوت کن تا خود پوریا ببیند
+                }
+
+                console.log(`📩 [پی‌وی شخصی] پیام جدید از ${senderName} (پیام #${sessionData.messageCount + 1}): "${messageText}"`);
+
+                const isFirstMessage = sessionData.history.length === 0;
+
+                // اضافه کردن پیام کاربر به تاریخچه مکالمه
+                sessionData.history.push({ role: 'user', content: messageText });
+                sessionData.lastTime = now;
+                sessionData.messageCount++;
+
+                // ساخت پرامپت هوشمند منشی پویا
+                const systemInstruction = `تو «حسن» هستی؛ دستیار و منشی شخصی بسیار باهوش، گرم، لوتی و مودب «پوریا» در اکانت تلگرامش.
+پوریا در حال حاضر آنلاین نیست یا سرش شلوغ است و تو وظیفه داری با این مخاطب چت کنی تا بفهمی کارش چیه، نیازش چیه و پیام یا درخواستش را ثبت کنی تا دقیق به پوریا انتقال دهی.
+
+قوانین گفتگو:
+۱. لحنت کاملاً طبیعی، گرم، خودمانی و صمیمی باشد (اصلاً متن رباتی، تکراری یا خشک نباشد).
+۲. ${isFirstMessage 
+    ? 'این پیام اول این مخاطب است. خیلی کوتاه و گرم بگو من حسن (منشی پوریا) هستم، پوریا الان آنلاین نیست. بپرس چه امری یا کاری داشته تا یادداشت کنی و به پوریا بگی.' 
+    : 'مکالمه قبلاً شروع شده است. دیگر اصلاً خودت را معرفی نکن! مستقیماً و کاملاً مرتبط با آخرین صحبت مخاطب، با او گفتگو کن. اگر کارش را گفت، بگو کامل یادداشت کردی و پیگیری می‌کنی یا اگر سوالی پرسیده پاسخ کوتاه و راهنمایی بده.'}
+۳. پاسخ‌هایت حتماً کوتاه (حداکثر ۱ یا ۲ جمله)، پویا و مکالمه‌محور باشد.
+۴. اگر کلمه «پوریا» لازم بود، نهایتاً یک‌بار در کل پیامت بیاور.`;
+
                 let autoReply = '';
                 try {
-                    const prompt = `تو «حسن» هستی، منشی هوشمند «پوریا». این اکانت تلگرام برای پوریاست و یک نفر در پی‌وی این پیام را فرستاده:
-"${messageText}"
+                    const messagesForAI = [
+                        { role: 'system', content: systemInstruction },
+                        ...sessionData.history.slice(-6)
+                    ];
 
-یک پاسخ بسیار کوتاه (حداکثر ۱ یا ۲ جمله)، کاملاً روان، گرم و خودمانی بنویس. بگو منشی پوریا هستی و در اولین فرصت بهش خبر میدی تا خودش جواب بده.
-⚠️ قانون بسیار مهم: کلمه «پوریا» را در کل پاسخت فقط و فقط «یک بار» استفاده کن و اصلاً تکرارش نکن! (مثلاً بگو: «سلام! من حسن هستم، منشی پوریا. الان سرش شلوغه، بهش خبر میدم خودش بهت پیام بده» و نه اینکه هی اسم پوریا رو تکرار کنی).`;
-
-                    const systemInstruction = 'تو حسن، منشی باهوش پوریا هستی. مختصر، گرم و بدون تکرار مکررات جواب بده. اسم پوریا را فقط یک بار در کل جمله بیاور.';
-
-                    autoReply = await askAI({ prompt, systemInstruction });
+                    autoReply = await askAI({
+                        systemInstruction,
+                        messages: messagesForAI,
+                        prompt: messageText
+                    });
                 } catch (aiErr) {
                     console.warn('⚠️ خطا در دریافت پاسخ از هوش مصنوعی برای منشی:', aiErr.message);
                 }
 
                 if (!autoReply) {
-                    autoReply = `سلام ${senderName} عزیز! من حسن هستم، منشی هوشمند پوریا. الان سرش شلوغه یا آنلاین نیست، پیامت رو بهش می‌رسونم تا در اولین فرصت خودش جواب بده. 🙏`;
+                    if (isFirstMessage) {
+                        autoReply = `سلام ${senderName} عزیز! من حسن هستم، منشی پوریا. پوریا الان آنلاین نیست، امری یا کاری داشتی بگو من یادداشت کنم و بهش بگم. 🙏`;
+                    } else {
+                        autoReply = `حله، کامل یادداشت کردم و به پوریا اطلاع میدم تا در اولین فرصت خودش پیامت رو بخونه و جوابت رو بده.`;
+                    }
                 }
 
-                // ارسال پاسخ به پی‌وی طرف
+                // ثبت پاسخ منشی در تاریخچه
+                sessionData.history.push({ role: 'assistant', content: autoReply });
+
+                // ارسال پاسخ به پی‌وی مخاطب
                 try {
                     await client.sendMessage(senderId, { message: autoReply });
-                    repliedRecently.set(senderId, now);
-                    console.log(`🤖 [منشی شخصی] پاسخ به ${senderName} ارسال شد.`);
+                    console.log(`🤖 [منشی شخصی] پاسخ مرحله ${sessionData.messageCount} به ${senderName} ارسال شد.`);
                 } catch (sendErr) {
                     console.error('❌ خطا در ارسال پیام منشی:', sendErr.message);
                 }
 
-                // ارسال اعلان به خود مالک در ربات دستیار
+                // ارسال گزارش زنده به خود مالک در ربات دستیار
                 if (botInstance && process.env.TELEGRAM_OWNER_ID) {
-                    const alertMsg = `📢 *پیام جدید در پی‌وی اکانت شما!*\n\n👤 *از طرف:* ${senderName}\n💬 *متن پیام:* "${messageText}"\n\n🤖 *پاسخ خودکار منشی:*\n"${autoReply}"`;
+                    const alertMsg = `📢 *مکالمه منشی با ${senderName}:*\n\n💬 *پیام مخاطب:* "${messageText}"\n🤖 *پاسخ حسن:* "${autoReply}"\n\n_(مرحله ${sessionData.messageCount} مکالمه)_`;
                     await botInstance.telegram.sendMessage(process.env.TELEGRAM_OWNER_ID, alertMsg, { parse_mode: 'Markdown' }).catch(() => {});
                 }
 
