@@ -372,9 +372,10 @@ async function processMessage(userMessage, sessionId = 'default', onStatus = nul
 
             let response;
             const modelsToTry = [
+                'gemini-3.6-flash',
+                'gemini-3-flash-preview',
                 'gemini-3.5-flash-lite',
                 'gemini-flash-lite-latest',
-                'gemini-3.1-flash-lite',
                 'gemini-3.8-flash'
             ];
             let lastError = null;
@@ -395,6 +396,7 @@ async function processMessage(userMessage, sessionId = 'default', onStatus = nul
                 } catch (err) {
                     lastError = err;
                     console.warn(`⚠️ خطا با مدل ${modelName}، تلاش با مدل بعدی...`, err.message);
+                    await new Promise(r => setTimeout(r, 1000));
                 }
             }
 
