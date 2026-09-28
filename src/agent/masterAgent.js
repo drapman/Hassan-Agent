@@ -370,12 +370,13 @@ async function processMessage(userMessage, sessionId = 'default', onStatus = nul
         while (iterationCount < maxIterations) {
             iterationCount++;
 
-            let response;
             const modelsToTry = [
+                'gemini-2.5-flash',
                 'gemini-3.6-flash',
                 'gemini-3-flash-preview',
-                'gemini-3.5-flash-lite',
+                'gemini-2.5-flash-preview',
                 'gemini-flash-lite-latest',
+                'gemini-3.5-flash-lite',
                 'gemini-3.8-flash'
             ];
             let lastError = null;
@@ -396,11 +397,20 @@ async function processMessage(userMessage, sessionId = 'default', onStatus = nul
                 } catch (err) {
                     lastError = err;
                     console.warn(`⚠️ خطا با مدل ${modelName}، تلاش با مدل بعدی...`, err.message);
-                    await new Promise(r => setTimeout(r, 1000));
+                    await new Promise(r => setTimeout(r, 600));
                 }
             }
 
             if (!response) {
+                // اگر تمام مدل‌های جمینای به مشکل خوردند، تلاش با Groq یا OpenRouter
+                try {
+                    const { askAI } = require('./aiRouter');
+                    console.log('🔄 تلاش برای دریافت پاسخ با Groq / OpenRouter به عنوان فال‌بک...');
+                    const fallbackText = await askAI({ prompt: userMessage, systemInstruction: SYSTEM_PROMPT });
+                    if (fallbackText) return fallbackText;
+                } catch (aiRouterErr) {
+                    console.error('❌ فال‌بک هوش مصنوعی کمکی هم ناموفق بود:', aiRouterErr.message);
+                }
                 throw lastError || new Error('خطا در ارتباط با هوش مصنوعی');
             }
 
