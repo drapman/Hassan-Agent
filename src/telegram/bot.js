@@ -208,8 +208,8 @@ bot.on('text', async (ctx) => {
     await handleUserMessage(ctx, text, wantsVoice);
 });
 
-// هندلر صدا (شنیدن ویس کاربر و پاسخ صوتی دوطرفه)
-bot.on(['voice', 'audio'], async (ctx) => {
+// هندلر صدا و پیام ویدیویی (شنیدن ویس کاربر و پاسخ صوتی دوطرفه)
+bot.on(['voice', 'audio', 'video_note'], async (ctx) => {
     const userId = ctx.from.id;
     if (processingUsers.has(userId)) {
         await ctx.reply('⏳ صبر کن، هنوز دارم روی پیام قبلیت کار می‌کنم...');
@@ -217,7 +217,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
     }
 
     try {
-        const voice = ctx.message.voice || ctx.message.audio;
+        const voice = ctx.message.voice || ctx.message.audio || ctx.message.video_note;
         if (!voice) return;
 
         await ctx.sendChatAction('record_voice');

@@ -21,12 +21,15 @@ if (process.env.GEMINI_API_KEY) {
 async function transcribeAudio(audioBuffer, mimeType = 'audio/ogg') {
     if (!audioBuffer || audioBuffer.length === 0) return '';
 
+    let cleanMime = (mimeType || 'audio/ogg').split(';')[0].trim().toLowerCase();
+    if (cleanMime === 'audio/opus') cleanMime = 'audio/ogg';
+
     // ۱. تلاش با Groq Whisper (فوق‌العاده سریع و دقیق در فارسی)
     if (process.env.GROQ_API_KEY) {
         try {
             console.log('🎙️ در حال پیاده‌سازی متن فایل صوتی با Groq Whisper...');
             const formData = new FormData();
-            const blob = new Blob([audioBuffer], { type: mimeType });
+            const blob = new Blob([audioBuffer], { type: cleanMime });
             formData.append('file', blob, 'voice.ogg');
             formData.append('model', 'whisper-large-v3-turbo');
             formData.append('language', 'fa');
@@ -70,7 +73,7 @@ async function transcribeAudio(audioBuffer, mimeType = 'audio/ogg') {
                         parts: [
                             {
                                 inlineData: {
-                                    mimeType,
+                                    mimeType: cleanMime,
                                     data: audioBuffer.toString('base64')
                                 }
                             },
