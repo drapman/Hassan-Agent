@@ -74,19 +74,29 @@ async function startUserbot(botInstance = null) {
                 // تولید پاسخ هوشمندانه با هوش مصنوعی
                 let autoReply = '';
                 if (ai) {
-                    try {
-                        const prompt = `تو دستیار و منشی شخصی حسن در اکانت تلگرامش هستی. یک نفر در پی‌وی به حسن این پیام را فرستاده است:
+                    const prompt = `تو دستیار و منشی شخصی حسن در اکانت تلگرامش هستی. یک نفر در پی‌وی به حسن این پیام را فرستاده است:
 "${messageText}"
 
 حسن در حال حاضر ممکن است آنلاین نباشد یا سرش شلوغ باشد. یک پاسخ بسیار کوتاه (حداکثر ۱ یا ۲ جمله)، خیلی محترمانه، گرم و خودمانی بنویس. بگو پیامش را دریافت کردی و به حسن اطلاع می‌دهی تا در اولین فرصت پاسخ دهد. اگر سوال مشخص و ساده‌ای پرسیده، راهنمایی کوتاهی بکن. حتماً خودت را به عنوان «دستیار/منشی حسن» معرفی کن تا طرف بداند با هوش مصنوعی صحبت می‌کند.`;
 
-                        const res = await ai.models.generateContent({
-                            model: 'gemini-3.5-flash-lite',
-                            contents: prompt,
-                        });
-                        autoReply = res.text?.trim();
-                    } catch (e) {
-                        console.warn('⚠️ خطا در ساخت پاسخ منشی با Gemini:', e.message);
+                    const modelsToTry = [
+                        'gemini-2.5-flash',
+                        'gemini-3.6-flash',
+                        'gemini-3-flash-preview',
+                        'gemini-2.5-flash-preview'
+                    ];
+
+                    for (const m of modelsToTry) {
+                        try {
+                            const res = await ai.models.generateContent({
+                                model: m,
+                                contents: prompt,
+                            });
+                            autoReply = res.text?.trim();
+                            if (autoReply) break;
+                        } catch (e) {
+                            // در صورت خطا در مدل، مدل بعدی را امتحان کن
+                        }
                     }
                 }
 
@@ -95,9 +105,13 @@ async function startUserbot(botInstance = null) {
                 }
 
                 // ارسال پاسخ به پی‌وی طرف
-                await event.respond({ message: autoReply });
-                repliedRecently.set(senderId, now);
-                console.log(`🤖 [منشی شخصی] پاسخ به ${senderName} ارسال شد.`);
+                try {
+                    await client.sendMessage(senderId, { message: autoReply });
+                    repliedRecently.set(senderId, now);
+                    console.log(`🤖 [منشی شخصی] پاسخ به ${senderName} ارسال شد.`);
+                } catch (sendErr) {
+                    console.error('❌ خطا در ارسال پیام منشی:', sendErr.message);
+                }
 
                 // ارسال اعلان به خود مالک در ربات دستیار
                 if (botInstance && process.env.TELEGRAM_OWNER_ID) {
