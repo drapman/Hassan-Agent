@@ -66,7 +66,7 @@ async function transcribeAudio(audioBuffer, mimeType = 'audio/ogg') {
             if (!geminiClient) geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
             const response = await geminiClient.models.generateContent({
-                model: 'gemini-2.5-flash',
+                model: 'gemini-3.8-flash',
                 contents: [
                     {
                         role: 'user',

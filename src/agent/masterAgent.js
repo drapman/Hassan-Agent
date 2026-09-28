@@ -397,8 +397,12 @@ async function processMessage(userMessage, sessionId = 'default', onStatus = nul
                     if (response) break;
                 } catch (err) {
                     lastError = err;
-                    console.warn(`⚠️ خطا با مدل ${modelName}، تلاش با مدل بعدی...`, err.message);
-                    await new Promise(r => setTimeout(r, 600));
+                    console.warn(`⚠️ خطا با مدل ${modelName}:`, err.message);
+                    // اگر سهمیه تمام شده یا مدل یافت نشد، وقت را هدر نده و فوراً به Groq / OpenRouter سوییچ کن
+                    if (err.status === 429 || err.message?.includes('RESOURCE_EXHAUSTED')) {
+                        console.log('⚡ سهمیه جمینای پر شده، سوییچ فوری به Groq / OpenRouter...');
+                        break;
+                    }
                 }
             }
 
