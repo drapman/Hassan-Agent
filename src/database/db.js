@@ -93,10 +93,26 @@ function initializeDatabase() {
             total_price TEXT,
             order_date DATETIME,
             expected_delivery DATETIME,
-            tracking_code TEXT,
-            details TEXT DEFAULT '{}',
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+    `);
+
+    // جدول مخاطبان پی‌وی تلگرام
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS telegram_contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id TEXT UNIQUE NOT NULL,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            last_message TEXT,
+            last_summary TEXT,
+            total_messages INTEGER DEFAULT 1,
+            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_tg_contacts_id ON telegram_contacts(telegram_id);
+        CREATE INDEX IF NOT EXISTS idx_tg_contacts_user ON telegram_contacts(username);
     `);
 
     console.log('✅ Database initialized successfully');
@@ -238,6 +254,68 @@ const logOps = {
     `)
 };
 
+// ─────────────────────────────────────────
+// Telegram Contacts Functions (مخاطبان پی‌وی)
+// ─────────────────────────────────────────
+
+const contactOps = {
+    save: (data) => {
+        const stmt = db.prepare(`
+            INSERT INTO telegram_contacts (telegram_id, username, first_name, last_name, last_message, total_messages, last_seen)
+            VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+            ON CONFLICT(telegram_id) DO UPDATE SET
+                username = COALESCE(excluded.username, telegram_contacts.username),
+                first_name = COALESCE(excluded.first_name, telegram_contacts.first_name),
+                last_name = COALESCE(excluded.last_name, telegram_contacts.last_name),
+                last_message = excluded.last_message,
+                total_messages = telegram_contacts.total_messages + 1,
+                last_seen = CURRENT_TIMESTAMP
+        `);
+        return stmt.run(
+            String(data.telegram_id),
+            data.username || null,
+            data.first_name || null,
+            data.last_name || null,
+            data.last_message || ''
+        );
+    },
+
+    updateSummary: (telegram_id, summary) => {
+        const stmt = db.prepare(`
+            UPDATE telegram_contacts 
+            SET last_summary = ?
+            WHERE telegram_id = ?
+        `);
+        return stmt.run(summary, String(telegram_id));
+    },
+
+    getById: (telegram_id) => {
+        const stmt = db.prepare(`SELECT * FROM telegram_contacts WHERE telegram_id = ?`);
+        return stmt.get(String(telegram_id));
+    },
+
+    getByUsername: (username) => {
+        const cleanUser = username.replace('@', '');
+        const stmt = db.prepare(`SELECT * FROM telegram_contacts WHERE username = ? COLLATE NOCASE`);
+        return stmt.get(cleanUser);
+    },
+
+    getRecent: (limit = 20) => {
+        const stmt = db.prepare(`SELECT * FROM telegram_contacts ORDER BY last_seen DESC LIMIT ?`);
+        return stmt.all(limit);
+    },
+
+    search: (query) => {
+        const q = `%${query.replace('@', '')}%`;
+        const stmt = db.prepare(`
+            SELECT * FROM telegram_contacts 
+            WHERE username LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR telegram_id LIKE ?
+            ORDER BY last_seen DESC LIMIT 10
+        `);
+        return stmt.all(q, q, q, q);
+    }
+};
+
 module.exports = {
     db,
     initializeDatabase,
@@ -245,5 +323,6 @@ module.exports = {
     siteUsers: siteUserOps,
     memory: memoryOps,
     orders: orderOps,
+    contacts: contactOps,
     log: logOps,
 };

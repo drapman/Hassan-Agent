@@ -9,6 +9,7 @@ const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const { NewMessage } = require('telegram/events');
 const { askAI } = require('../agent/aiRouter');
+const { contacts } = require('../database/db');
 
 const apiId = 2040;
 const apiHash = 'b18441a1ff607e10a989891a5462e627';
@@ -66,7 +67,10 @@ async function startUserbot(botInstance = null) {
                 if (!sender) return;
 
                 const senderId = sender.id?.toString();
-                const senderName = sender.firstName || sender.username || 'یک مخاطب';
+                const senderUsername = sender.username || '';
+                const senderFirstName = sender.firstName || '';
+                const senderLastName = sender.lastName || '';
+                const senderName = senderFirstName || senderUsername || 'یک مخاطب';
                 const messageText = (message.text || '').trim();
 
                 // فیلترهای حیاتی:
@@ -76,31 +80,53 @@ async function startUserbot(botInstance = null) {
                 // ۳. نادیده گرفتن پیام‌های ارسالی از خودمان، ذخیره پیام‌ها (Saved Messages) و تلگرام رسمی
                 if (senderId === myId || senderId === '777000' || !messageText) return;
 
-                // ۴. بررسی فعال بودن قابلیت پاسخ خودکار
+                // ۴. ذخیره مشخصات کاربر در حافظه دیتابیس SQLite
+                try {
+                    contacts.save({
+                        telegram_id: senderId,
+                        username: senderUsername,
+                        first_name: senderFirstName,
+                        last_name: senderLastName,
+                        last_message: messageText
+                    });
+                } catch (e) {
+                    console.warn('⚠️ خطا در ذخیره مخاطب در دیتابیس:', e.message);
+                }
+
+                // ۵. بررسی فعال بودن قابلیت پاسخ خودکار
                 if (process.env.TELEGRAM_AUTO_REPLY === 'false') return;
 
                 const now = Date.now();
 
-                // ۵. بررسی مکالمه زنده توسط پوریا (اگر خودت پیام دادی، منشی دخالت نمی‌کنه)
+                // ۶. بررسی مکالمه زنده توسط پوریا (اگر خودت پیام دادی، منشی دخالت نمی‌کنه)
                 const lastHumanChatTime = activeHumanChats.get(senderId) || 0;
                 if (now - lastHumanChatTime < 30 * 60 * 1000) {
                     return; // پوریا اخیراً با این مخاطب چت کرده، منشی ساکت می‌ماند
                 }
 
-                // ۶. مدیریت سشن گفتگو (حافظه تاریخچه چت منشی با مخاطب)
+                // ۷. مدیریت سشن گفتگو (حافظه تاریخچه چت منشی با مخاطب)
                 let sessionData = userSessions.get(senderId);
                 // اگر بیش از ۱۵ دقیقه از آخرین پیام گذشته باشد، مکالمه جدید شروع می‌شود
                 if (!sessionData || (now - sessionData.lastTime > 15 * 60 * 1000)) {
-                    sessionData = { history: [], lastTime: now, messageCount: 0 };
+                    sessionData = {
+                        history: [],
+                        lastTime: now,
+                        messageCount: 0,
+                        senderName,
+                        senderUsername
+                    };
                     userSessions.set(senderId, sessionData);
+                } else {
+                    sessionData.senderName = senderName;
+                    sessionData.senderUsername = senderUsername;
                 }
 
                 // بررسی سقف پیام‌ها در یک جلسه (برای جلوگیری از سوءاستفاده یا اسپم بی‌پایان)
-                if (sessionData.messageCount >= 7) {
-                    return; // بیشتر از ۷ رفت و برگشت سکوت کن تا خود پوریا ببیند
+                if (sessionData.messageCount >= 8) {
+                    return; // بیشتر از ۸ رفت و برگشت سکوت کن تا خود پوریا ببیند
                 }
 
-                console.log(`📩 [پی‌وی شخصی] پیام جدید از ${senderName} (پیام #${sessionData.messageCount + 1}): "${messageText}"`);
+                console.log(`📩 [پی‌وی شخصی] پیام جدید از ${senderName} (@${senderUsername || 'بدون_یوزرنیم'}): "${messageText}"`);
 
                 const isFirstMessage = sessionData.history.length === 0;
 
@@ -111,37 +137,31 @@ async function startUserbot(botInstance = null) {
 
                 // اگر پیام اول مخاطب است، بلافاصله به پوریا اطلاع بده
                 if (isFirstMessage && botInstance && process.env.TELEGRAM_OWNER_ID) {
+                    const userDisplay = senderUsername ? `@${senderUsername}` : 'ندارد';
                     const initialAlert = `🔔 *پیام جدید در پی‌وی شما!*\n\n` +
-                        `👤 *از طرف:* ${senderName}\n` +
+                        `👤 *نام:* ${senderName}\n` +
+                        `🆔 *آیدی عددی:* \`${senderId}\`\n` +
+                        `🌐 *یوزرنیم:* ${userDisplay}\n` +
                         `💬 *متن پیام:* "${messageText}"\n\n` +
-                        `⏳ _حسن در حال گفتگو با مخاطب است. پس از پایان چت، خلاصه هدف و پیامش برای شما ارسال می‌شود._`;
+                        `⏳ _حسن با شوخ‌طبعی در حال چت با مخاطب است. پس از پایان گفتگو، خلاصه کامل برای شما ارسال می‌شود._`;
                     botInstance.telegram.sendMessage(process.env.TELEGRAM_OWNER_ID, initialAlert, { parse_mode: 'Markdown' }).catch(() => {});
                 }
 
-                // ساخت پرامپت هوشمند و پویا بر اساس مرحله گفتگو
                 const count = sessionData.messageCount;
-                let phaseGuidance = '';
+                const isFirst = count === 1;
 
-                if (count === 1) {
-                    phaseGuidance = 'این اولین پیام مخاطب است. خیلی خودمانی، باادب و صمیمی بگو من حسن هستم، منشی پوریا. پوریا الان آنلاین نیست یا سرش شلوغه. بگو بفرما جانم چه امری داشتی بگو تا دقیق بهش بگم؟';
-                } else if (count >= 2 && count <= 3) {
-                    phaseGuidance = 'مکالمه در حال پیشرفت است. اصلاً خودت را دوباره معرفی نکن و سلام تکراری نده! به حرف‌ها یا سوال مخاطب پاسخ طبیعی و مرتبط بده، پیگیر کارش باش و مثل دو تا رفیق باهاش چت کن تا کامل بفهمی موضوع چیه.';
-                } else if (count === 4 || count === 5) {
-                    phaseGuidance = 'چندین پیام رد و بدل شده و وقت جمع‌بندی است. خودمانی و باحال بهش بگو: «اگر کار دیگه‌ای هم با پوریا داری بگو تا کامل یادداشت کنم، وگرنه منم جای دیگه دستم بنده و سرم شلوغه باید به بقیه کارا برسم!».';
-                } else {
-                    phaseGuidance = 'مکالمه تمام است. خیلی گرم، لوتی و خودمانی گفتگو را جمع کن و خداحافظی کن (مثلاً: «حله داداش، همه چی ثبت شد و به پوریا میگم خودش بیاد پیویت. فعلاً دمت گرم، روزت خوش»).';
-                }
+                // ساخت پرامپت هوشمند، شوخ‌طبع، زنده و واکنش‌گرا به متن کاربر
+                const systemInstruction = `تو «حسن» هستی؛ دستیار و منشی شخصی پوریا در تلگرام.
+شخصیت و لحن تو:
+- فوق‌العاده باحال، شوخ‌طبع، خونگرم، حاضر‌جواب و رفیق‌باز (لوتی و تهرونی)، ولی در عین حال بسیار مودب و باهوش.
+- اینجا پی‌وی تلگرام شخصی پوریاست. پوریا الان آنلاین نیست یا سرش شلوغه و تو داری به جایش چت می‌کنی.
 
-                const systemInstruction = `تو «حسن» هستی؛ دستیار و منشی شخصی پوریا. بسیار خونگرم، لوتی، خاکی، باادب و باهوش.
-پوریا الان نیست و تو داری در پی‌وی تلگرام با این شخص چت می‌کنی.
-
-دستورالعمل این مرحله:
-${phaseGuidance}
-
-قوانین ثابت:
-۱. کاملاً طبیعی و ایرانی صحبت کن، انگار یک آدم واقعی پشت کیبورده (اصلاً جملات تکراری، کلیشه‌ای یا خشک نزن).
-۲. پاسخ‌ها کوتاه، روان و حداکثر ۱ تا ۲ جمله باشد.
-۳. در صورت نیاز به اسم پوریا، نهایتاً یک‌بار در کل جمله‌ات نامش را بیاور.`;
+اصول کلیدی که باید رعایت کنی:
+۱. معرفی: ${isFirst ? 'چون پیام اول این مخاطب است، خیلی کوتاه و با شوخی خودت را معرفی کن (مثلاً: «سلام مخلصم! من حسنم، دستیار و منشی باحال پوریا. پوریا فعلاً سرش شلوغه ولی من در خدمتم، بفرما داداش چی شده؟»).' : 'چون مکالمه قبلاً شروع شده، به هیچ وجه دیگر سلام مجدد نده و خودت را معرفی نکن!'}
+۲. پاسخ دقیق و مرتبط به حرف مخاطب: دقیقاً به همان سوال، حرف، شوخی یا درخواستی که مخاطب زده جواب بده! اگر حال پوریا را پرسید، اگر سوال فنی یا کاری پرسید، اگر احوالپرسی کرد، مستقیم متناسب با همان جواب بده. هرگز پاسخ‌های خشک، کلیشه‌ای یا رباتی از پیش تعیین‌شده نده.
+۳. حس شوخ‌طبعی: بامزه باش، تیکه‌های صمیمی بنداز و حس یک گفتگوی زنده و باحال را منتقل کن.
+۴. هدف‌سنجی و جمع‌بندی: ${count >= 4 ? 'چندین پیام رد و بدل شده؛ خیلی شوخ و خودمانی بگو اگر کار یا پیام دیگری هم با پوریا داری بگو تا یادداشت کنم، وگرنه منم جای دیگه دستم بنده و سرم شلوغه باید برم به بقیه کارام برسم!' : 'در حین چت متوجه شو چه کاری با پوریا دارد تا دقیق ثبت کنی.'}
+۵. پاسخ‌ها کوتاه، روان و نهایتاً ۱ تا ۲ جمله باشد.`;
 
                 let autoReply = '';
                 try {
@@ -161,11 +181,11 @@ ${phaseGuidance}
 
                 if (!autoReply) {
                     if (count === 1) {
-                        autoReply = `سلام ${senderName} عزیز! من حسنم، منشی پوریا. پوریا الان آنلاین نیست، بفرما جانم امری داشتی بگو من ثبت کنم و بهش بگم.`;
+                        autoReply = `سلام مخلصم! من حسنم، دستیار باحال پوریا. پوریا فعلاً سرش شلوغه، بفرما داداش در خدمتم کاری داشتی بگو ثبت کنم بهش بگم.`;
                     } else if (count >= 4) {
-                        autoReply = `حله، اگه کار دیگه‌ای هم با پوریا داری بگو یادداشت کنم، وگرنه منم باید برم به کارام برسم سرم شلوغه! 🙏`;
+                        autoReply = `حله رفیق، اگه کار دیگه‌ای هم با پوریا داری بگو تا یادداشت کنم، وگرنه منم باید برم سر کارم که سرم شلوغه! 🙏`;
                     } else {
-                        autoReply = `متوجه شدم، مورد دیگه‌ای هم هست یا دقیقاً همینو به پوریا منتقل کنم؟`;
+                        autoReply = `حله گرفتم چی شد، نکته دیگه‌ای هم هست بهش بگم یا همینو به پوریا برسونم؟`;
                     }
                 }
 
@@ -180,8 +200,8 @@ ${phaseGuidance}
                     console.error('❌ خطا در ارسال پیام منشی:', sendErr.message);
                 }
 
-                // اگر مکالمه به جمع‌بندی رسید (پیام ۶ به بعد)، سریع‌تر خلاصه را بفرست
-                const summaryDelay = count >= 5 ? 40 * 1000 : 2 * 60 * 1000;
+                // اگر مکالمه به جمع‌بندی رسید (پیام ۴ به بعد)، زمان انتظار را کوتاه‌تر کن
+                const summaryDelay = count >= 4 ? 45 * 1000 : 2 * 60 * 1000;
 
                 if (sessionData.summaryTimer) {
                     clearTimeout(sessionData.summaryTimer);
@@ -229,17 +249,28 @@ ${chatLog}
             systemInstruction: 'تو دستیار گزارش‌دهی پوریا هستی. خلاصه گفتگوی تلگرام را بسیار تمیز، مختصر و مفید بنویس.'
         });
 
-        const reportMsg = `📋 *گزارش پایان گفتگو با ${senderName}*\n\n` +
-            `🎯 *خلاصه هدف و نتیجه گفتگو:*\n${summary.trim()}\n\n` +
+        // ذخیره خلاصه در دیتابیس
+        try {
+            contacts.updateSummary(senderId, summary.trim());
+        } catch (e) {}
+
+        const usernameText = sessionData.senderUsername ? `@${sessionData.senderUsername}` : 'ندارد';
+
+        const reportMsg = `📋 *گزارش پایان گفتگو با مخاطب*\n\n` +
+            `👤 *نام:* ${senderName}\n` +
+            `🆔 *آیدی عددی (User ID):* \`${senderId}\`\n` +
+            `🌐 *یوزرنیم:* ${usernameText}\n\n` +
+            `🎯 *خلاصه گفتگو و خواسته مخاطب:*\n${summary.trim()}\n\n` +
             `💬 *تعداد تبادل پیام:* ${Math.ceil(sessionData.history.length / 2)}\n` +
             `🕒 *زمان اتمام:* ${new Date().toLocaleTimeString('fa-IR', { timeZone: 'Asia/Tehran' })}`;
 
         await botInstance.telegram.sendMessage(process.env.TELEGRAM_OWNER_ID, reportMsg, { parse_mode: 'Markdown' });
-        console.log(`✅ خلاصه گفتگوی منشی با ${senderName} برای پوریا ارسال شد.`);
+        console.log(`✅ خلاصه گفتگوی منشی با ${senderName} همراه با آیدی و یوزرنیم برای پوریا ارسال شد.`);
     } catch (err) {
         console.error('❌ خطا در ارسال خلاصه گفتگو:', err.message);
     }
 }
 
 module.exports = { startUserbot };
+
 
