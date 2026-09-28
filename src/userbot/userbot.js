@@ -8,7 +8,7 @@ require('dotenv').config();
 const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const { NewMessage } = require('telegram/events');
-const { GoogleGenAI } = require('@google/genai');
+const { askAI } = require('../agent/aiRouter');
 
 const apiId = 2040;
 const apiHash = 'b18441a1ff607e10a989891a5462e627';
@@ -16,12 +16,6 @@ const session = process.env.TELEGRAM_USER_SESSION || '';
 
 let client = null;
 const repliedRecently = new Map(); // جلوگیری از اسپم (کول‌داون برای هر کاربر)
-
-// تنظیم هوش مصنوعی برای منشی
-let ai = null;
-if (process.env.GEMINI_API_KEY) {
-    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-}
 
 /**
  * راه‌اندازی منشی هوشمند روی اکانت شخصی
@@ -71,33 +65,19 @@ async function startUserbot(botInstance = null) {
 
                 console.log(`📩 [پی‌وی شخصی] پیام جدید از ${senderName}: "${messageText}"`);
 
-                // تولید پاسخ هوشمندانه با هوش مصنوعی
+                // تولید پاسخ هوشمندانه با هوش مصنوعی (سوئیچ خودکار بین Groq, OpenRouter, Gemini)
                 let autoReply = '';
-                if (ai) {
-                    const prompt = `تو دستیار و منشی شخصی حسن در اکانت تلگرامش هستی. یک نفر در پی‌وی به حسن این پیام را فرستاده است:
+                try {
+                    const prompt = `یک نفر در پی‌وی تلگرام به حسن این پیام را فرستاده است:
 "${messageText}"
 
-حسن در حال حاضر ممکن است آنلاین نباشد یا سرش شلوغ باشد. یک پاسخ بسیار کوتاه (حداکثر ۱ یا ۲ جمله)، خیلی محترمانه، گرم و خودمانی بنویس. بگو پیامش را دریافت کردی و به حسن اطلاع می‌دهی تا در اولین فرصت پاسخ دهد. اگر سوال مشخص و ساده‌ای پرسیده، راهنمایی کوتاهی بکن. حتماً خودت را به عنوان «دستیار/منشی حسن» معرفی کن تا طرف بداند با هوش مصنوعی صحبت می‌کند.`;
+یک پاسخ بسیار کوتاه (حداکثر ۱ یا ۲ جمله)، خیلی محترمانه، گرم و خودمانی بنویس. بگو پیامش را دریافت کردی و به حسن اطلاع می‌دهی تا در اولین فرصت پاسخ دهد. اگر سوال مشخص و ساده‌ای پرسیده، راهنمایی کوتاهی بکن. خودت را «دستیار/منشی حسن» معرفی کن.`;
 
-                    const modelsToTry = [
-                        'gemini-2.5-flash',
-                        'gemini-3.6-flash',
-                        'gemini-3-flash-preview',
-                        'gemini-2.5-flash-preview'
-                    ];
+                    const systemInstruction = 'تو دستیار و منشی شخصی و هوشمند حسن در اکانت تلگرامش هستی. وظیفه‌ات پاسخ محترمانه و خودمانی به پیام‌های پی‌وی در غیاب حسن است.';
 
-                    for (const m of modelsToTry) {
-                        try {
-                            const res = await ai.models.generateContent({
-                                model: m,
-                                contents: prompt,
-                            });
-                            autoReply = res.text?.trim();
-                            if (autoReply) break;
-                        } catch (e) {
-                            // در صورت خطا در مدل، مدل بعدی را امتحان کن
-                        }
-                    }
+                    autoReply = await askAI({ prompt, systemInstruction });
+                } catch (aiErr) {
+                    console.warn('⚠️ خطا در دریافت پاسخ از هوش مصنوعی برای منشی:', aiErr.message);
                 }
 
                 if (!autoReply) {
