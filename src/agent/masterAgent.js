@@ -346,24 +346,30 @@ async function processMessage(userMessage, sessionId = 'default', onStatus = nul
         // دریافت تاریخچه مکالمه
         const history = conversations.getHistory.all(sessionId, 20);
 
-        // ساختن context پیام‌ها برای Gemini
-        const contents = [];
-        
-        // اضافه کردن تاریخچه (به جز پیام آخر که تازه اضافه شد)
+        // ساختن context پیام‌ها با فرمت استاندارد
+        const openAITools = toolDeclarations.map(t => ({ type: 'function', function: t }));
+        const messages = [
+            { role: 'system', content: SYSTEM_PROMPT }
+        ];
+
+        // اضافه کردن تاریخچه
         for (const msg of history.slice(0, -1)) {
-            contents.push({
-                role: msg.role === 'user' ? 'user' : 'model',
-                parts: [{ text: msg.content }],
+            messages.push({
+                role: msg.role === 'assistant' ? 'assistant' : 'user',
+                content: msg.content
             });
         }
 
-        // پیام فعلی
-        contents.push({
+        // پیام فعلی کاربر
+        messages.push({
             role: 'user',
-            parts: [{ text: userMessage }],
+            content: userMessage
         });
 
+        const { askAI } = require('./aiRouter');
+
         // ─── حلقه اجرای Agent با Tool Calling ───
+        // اولویت: ۱. Groq ➔ ۲. OpenRouter ➔ ۳. Gemini
         let maxIterations = 10; // جلوگیری از حلقه بی‌نهایت
         let iterationCount = 0;
         let finalResponse = '';
@@ -371,94 +377,54 @@ async function processMessage(userMessage, sessionId = 'default', onStatus = nul
         while (iterationCount < maxIterations) {
             iterationCount++;
 
-            const modelsToTry = [
-                'gemini-3.8-flash',
-                'gemini-3.7-flash',
-                'gemini-3.5-flash',
-                'gemini-3.1-flash-lite',
-                'gemini-flash-latest',
-                'gemini-3.6-flash',
-                'gemini-2.5-flash'
-            ];
-            let lastError = null;
+            // درخواست از هوش مصنوعی با اولویت Groq -> OpenRouter -> Gemini
+            const aiResult = await askAI({
+                prompt: userMessage,
+                systemInstruction: SYSTEM_PROMPT,
+                messages,
+                tools: openAITools
+            });
 
-            for (const modelName of modelsToTry) {
-                try {
-                    response = await ai.models.generateContent({
-                        model: modelName,
-                        contents,
-                        config: {
-                            systemInstruction: SYSTEM_PROMPT,
-                            tools: [{ functionDeclarations: toolDeclarations }],
-                            temperature: 0.7,
-                            maxOutputTokens: 2048,
-                        },
-                    });
-                    if (response) break;
-                } catch (err) {
-                    lastError = err;
-                    console.warn(`⚠️ خطا با مدل ${modelName}:`, err.message);
-                    // اگر سهمیه تمام شده یا مدل یافت نشد، وقت را هدر نده و فوراً به Groq / OpenRouter سوییچ کن
-                    if (err.status === 429 || err.message?.includes('RESOURCE_EXHAUSTED')) {
-                        console.log('⚡ سهمیه جمینای پر شده، سوییچ فوری به Groq / OpenRouter...');
-                        break;
+            // اگر مدل دستور اجرای ابزار (Tool Call) صادر کرد
+            if (aiResult && aiResult.tool_calls && aiResult.tool_calls.length > 0) {
+                const toolNames = aiResult.tool_calls.map(tc => tc.function?.name).filter(Boolean).join(', ');
+                if (onStatus && toolNames) {
+                    await onStatus(`⏳ در حال اجرای: ${toolNames}...`);
+                }
+
+                messages.push({
+                    role: 'assistant',
+                    content: aiResult.text || null,
+                    tool_calls: aiResult.tool_calls
+                });
+
+                for (const toolCall of aiResult.tool_calls) {
+                    const funcName = toolCall.function?.name;
+                    let args = {};
+                    try {
+                        args = typeof toolCall.function?.arguments === 'string'
+                            ? JSON.parse(toolCall.function.arguments)
+                            : (toolCall.function?.arguments || {});
+                    } catch {
+                        args = {};
                     }
+
+                    const toolResult = await executeTool(funcName, args);
+                    messages.push({
+                        role: 'tool',
+                        tool_call_id: toolCall.id,
+                        content: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult)
+                    });
                 }
-            }
-
-            if (!response) {
-                // اگر تمام مدل‌های جمینای به مشکل خوردند، تلاش با Groq یا OpenRouter
-                try {
-                    const { askAI } = require('./aiRouter');
-                    console.log('🔄 تلاش برای دریافت پاسخ با Groq / OpenRouter به عنوان فال‌بک...');
-                    const fallbackText = await askAI({ prompt: userMessage, systemInstruction: SYSTEM_PROMPT });
-                    if (fallbackText) return fallbackText;
-                } catch (aiRouterErr) {
-                    console.error('❌ فال‌بک هوش مصنوعی کمکی هم ناموفق بود:', aiRouterErr.message);
-                }
-                throw lastError || new Error('خطا در ارتباط با هوش مصنوعی');
-            }
-
-            const candidate = response.candidates?.[0];
-            if (!candidate) break;
-
-            const parts = candidate.content?.parts || [];
-            const functionCalls = parts.filter(p => p.functionCall);
-            const textParts = parts.filter(p => p.text);
-
-            // اگه فقط متن بود → پاسخ نهایی
-            if (functionCalls.length === 0) {
-                finalResponse = textParts.map(p => p.text).join('');
+            } else if (aiResult && aiResult.text) {
+                finalResponse = aiResult.text;
+                break;
+            } else if (typeof aiResult === 'string') {
+                finalResponse = aiResult;
+                break;
+            } else {
                 break;
             }
-
-            // اطلاع‌رسانی وضعیت
-            if (onStatus) {
-                const toolNames = functionCalls.map(fc => fc.functionCall.name).join(', ');
-                await onStatus(`⏳ در حال اجرای: ${toolNames}...`);
-            }
-
-            // اضافه کردن پاسخ model به contents (با حفظ thoughtSignature)
-            contents.push(candidate.content);
-
-            // اجرای تمام ابزارها
-            const functionResults = [];
-            for (const part of functionCalls) {
-                const { name, args } = part.functionCall;
-                const result = await executeTool(name, args || {});
-                functionResults.push({
-                    functionResponse: {
-                        name,
-                        response: result,
-                    },
-                });
-            }
-
-            // اضافه کردن نتایج ابزارها
-            contents.push({
-                role: 'user',
-                parts: functionResults,
-            });
         }
 
         if (!finalResponse) {

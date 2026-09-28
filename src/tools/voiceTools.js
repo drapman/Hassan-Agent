@@ -4,6 +4,7 @@
  * Text-to-Speech: Microsoft Edge Neural TTS / Google TTS
  */
 
+require('dotenv').config();
 const axios = require('axios');
 const { GoogleGenAI } = require('@google/genai');
 

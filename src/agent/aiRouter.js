@@ -3,6 +3,7 @@
  * با قابلیت جابجایی خودکار در صورت قطعی یا پر شدن ترافیک (Smart Fallback)
  */
 
+require('dotenv').config();
 const axios = require('axios');
 const { GoogleGenAI } = require('@google/genai');
 
@@ -14,16 +15,19 @@ if (process.env.GEMINI_API_KEY) {
 /**
  * ارسال پیام به Groq (Llama 3.3 70B)
  */
-async function callGroq(prompt, systemInstruction = '', messages = null) {
+async function callGroq(prompt, systemInstruction = '', messages = null, tools = null) {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) throw new Error('GROQ_API_KEY تنظیم نشده است');
 
     let formattedMessages = [];
     if (messages && Array.isArray(messages) && messages.length > 0) {
-        formattedMessages = messages.map(m => ({
-            role: m.role === 'model' ? 'assistant' : m.role,
-            content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
-        }));
+        formattedMessages = messages.map(m => {
+            const role = m.role === 'model' ? 'assistant' : m.role;
+            const item = { role, content: m.content || '' };
+            if (m.tool_calls) item.tool_calls = m.tool_calls;
+            if (m.tool_call_id) item.tool_call_id = m.tool_call_id;
+            return item;
+        });
         if (systemInstruction && !formattedMessages.some(m => m.role === 'system')) {
             formattedMessages.unshift({ role: 'system', content: systemInstruction });
         }
@@ -39,14 +43,19 @@ async function callGroq(prompt, systemInstruction = '', messages = null) {
 
     for (const model of models) {
         try {
+            const body = {
+                model,
+                messages: formattedMessages,
+                temperature: 0.7,
+                max_tokens: 1500,
+            };
+            if (tools && tools.length > 0) {
+                body.tools = tools;
+            }
+
             const response = await axios.post(
                 'https://api.groq.com/openai/v1/chat/completions',
-                {
-                    model,
-                    messages: formattedMessages,
-                    temperature: 0.7,
-                    max_tokens: 2048,
-                },
+                body,
                 {
                     headers: {
                         'Authorization': `Bearer ${apiKey.trim()}`,
@@ -56,8 +65,16 @@ async function callGroq(prompt, systemInstruction = '', messages = null) {
                 }
             );
 
-            const text = response.data?.choices?.[0]?.message?.content?.trim();
-            if (text) return { text, provider: `Groq (${model})` };
+            const choice = response.data?.choices?.[0];
+            const msg = choice?.message;
+            if (msg) {
+                return {
+                    text: msg.content?.trim() || '',
+                    tool_calls: msg.tool_calls || null,
+                    rawMessage: msg,
+                    provider: `Groq (${model})`
+                };
+            }
         } catch (err) {
             lastErr = err;
             console.warn(`Groq (${model}) error:`, err.response?.data?.error?.message || err.message);
@@ -69,16 +86,19 @@ async function callGroq(prompt, systemInstruction = '', messages = null) {
 /**
  * ارسال پیام به OpenRouter (DeepSeek / Llama)
  */
-async function callOpenRouter(prompt, systemInstruction = '', messages = null) {
+async function callOpenRouter(prompt, systemInstruction = '', messages = null, tools = null) {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error('OPENROUTER_API_KEY تنظیم نشده است');
 
     let formattedMessages = [];
     if (messages && Array.isArray(messages) && messages.length > 0) {
-        formattedMessages = messages.map(m => ({
-            role: m.role === 'model' ? 'assistant' : m.role,
-            content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
-        }));
+        formattedMessages = messages.map(m => {
+            const role = m.role === 'model' ? 'assistant' : m.role;
+            const item = { role, content: m.content || '' };
+            if (m.tool_calls) item.tool_calls = m.tool_calls;
+            if (m.tool_call_id) item.tool_call_id = m.tool_call_id;
+            return item;
+        });
         if (systemInstruction && !formattedMessages.some(m => m.role === 'system')) {
             formattedMessages.unshift({ role: 'system', content: systemInstruction });
         }
@@ -99,14 +119,19 @@ async function callOpenRouter(prompt, systemInstruction = '', messages = null) {
 
     for (const model of models) {
         try {
+            const body = {
+                model,
+                messages: formattedMessages,
+                temperature: 0.7,
+                max_tokens: 1500
+            };
+            if (tools && tools.length > 0) {
+                body.tools = tools;
+            }
+
             const response = await axios.post(
                 'https://openrouter.ai/api/v1/chat/completions',
-                {
-                    model,
-                    messages: formattedMessages,
-                    temperature: 0.7,
-                    max_tokens: 1500
-                },
+                body,
                 {
                     headers: {
                         'Authorization': `Bearer ${apiKey.trim()}`,
@@ -118,8 +143,16 @@ async function callOpenRouter(prompt, systemInstruction = '', messages = null) {
                 }
             );
 
-            const text = response.data?.choices?.[0]?.message?.content?.trim();
-            if (text) return { text, provider: `OpenRouter (${model})` };
+            const choice = response.data?.choices?.[0];
+            const msg = choice?.message;
+            if (msg) {
+                return {
+                    text: msg.content?.trim() || '',
+                    tool_calls: msg.tool_calls || null,
+                    rawMessage: msg,
+                    provider: `OpenRouter (${model})`
+                };
+            }
         } catch (err) {
             lastErr = err;
             console.warn(`OpenRouter (${model}) error:`, err.response?.data?.error?.message || err.message);
@@ -138,13 +171,8 @@ async function callGemini(prompt, systemInstruction = '', messages = null) {
     }
 
     const models = [
+        'gemini-flash-lite-latest',
         'gemini-3.8-flash',
-        'gemini-3.7-flash',
-        'gemini-3.5-flash',
-        'gemini-3.1-flash-lite',
-        'gemini-flash-latest',
-        'gemini-3.6-flash',
-        'gemini-2.5-flash'
     ];
     let lastErr = null;
 
@@ -209,16 +237,16 @@ async function callGemini(prompt, systemInstruction = '', messages = null) {
 
 /**
  * تولید پاسخ هوشمند با سوییچ خودکار بین موتورها (Fallback هوشمند)
- * اولویت: Groq (سریع‌ترین) ➔ OpenRouter (تنوع بالا) ➔ Gemini (گوگل)
+ * اولویت: ۱. Groq (فوق‌العاده سریع) ➔ ۲. OpenRouter (پایدار و بدون قطعی) ➔ ۳. Gemini (گوگل)
  */
-async function askAI({ prompt = '', systemInstruction = '', messages = null }) {
+async function askAI({ prompt = '', systemInstruction = '', messages = null, tools = null }) {
     const providers = [];
 
     if (process.env.GROQ_API_KEY) {
-        providers.push({ name: 'Groq', fn: () => callGroq(prompt, systemInstruction, messages) });
+        providers.push({ name: 'Groq', fn: () => callGroq(prompt, systemInstruction, messages, tools) });
     }
     if (process.env.OPENROUTER_API_KEY) {
-        providers.push({ name: 'OpenRouter', fn: () => callOpenRouter(prompt, systemInstruction, messages) });
+        providers.push({ name: 'OpenRouter', fn: () => callOpenRouter(prompt, systemInstruction, messages, tools) });
     }
     if (process.env.GEMINI_API_KEY) {
         providers.push({ name: 'Gemini', fn: () => callGemini(prompt, systemInstruction, messages) });
@@ -234,8 +262,11 @@ async function askAI({ prompt = '', systemInstruction = '', messages = null }) {
     for (const provider of providers) {
         try {
             const result = await provider.fn();
-            if (result && result.text) {
+            if (result && (result.text || (result.tool_calls && result.tool_calls.length > 0))) {
                 console.log(`🤖 پاسخ موفقیت‌آمیز از هوش مصنوعی: ${result.provider}`);
+                if (tools && tools.length > 0) {
+                    return result;
+                }
                 return result.text;
             }
         } catch (err) {

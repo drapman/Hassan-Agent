@@ -29,8 +29,8 @@ if (!OWNER_ID) {
 // ──────────────────────────────────────────────────
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
-// وضعیت در حال پردازش برای هر کاربر
-const processingUsers = new Set();
+// صف پردازش ترتیبی پیام‌ها برای هر کاربر
+const userQueues = new Map();
 
 // ──────────────────────────────────────────────────
 // Middleware: بررسی دسترسی
@@ -251,88 +251,92 @@ bot.on('photo', async (ctx) => {
 // ──────────────────────────────────────────────────
 async function handleUserMessage(ctx, message, replyWithVoice = false) {
     const userId = ctx.from.id;
-    const sessionId = `telegram_${userId}`;
+    const prevQueue = userQueues.get(userId) || Promise.resolve();
 
-    // بررسی در حال پردازش
-    if (processingUsers.has(userId)) {
-        await ctx.reply('⏳ صبر کن، هنوز دارم روی درخواست قبلی کار می‌کنم...');
-        return;
-    }
+    const currentOperation = async () => {
+        const sessionId = `telegram_${userId}`;
+        let statusMessage = null;
+        try {
+            await ctx.sendChatAction(replyWithVoice ? 'record_voice' : 'typing');
+            statusMessage = await ctx.reply('🤔 در حال بررسی...');
+        } catch { /* ignore */ }
 
-    processingUsers.add(userId);
-
-    // نمایش وضعیت تایپ یا ضبط صدا
-    let statusMessage = null;
-    try {
-        await ctx.sendChatAction(replyWithVoice ? 'record_voice' : 'typing');
-        statusMessage = await ctx.reply('🤔 در حال بررسی...');
-    } catch { /* ignore */ }
-
-    try {
-        // callback برای آپدیت وضعیت
-        const onStatus = async (statusText) => {
-            try {
-                await ctx.telegram.editMessageText(
-                    ctx.chat.id,
-                    statusMessage?.message_id,
-                    null,
-                    statusText
-                );
-                await ctx.sendChatAction(replyWithVoice ? 'record_voice' : 'typing');
-            } catch { /* ignore edit errors */ }
-        };
-
-        // پردازش با Agent
-        const response = await processMessage(message, sessionId, onStatus);
-
-        // حذف پیام وضعیت
-        if (statusMessage) {
-            try {
-                await ctx.telegram.deleteMessage(ctx.chat.id, statusMessage.message_id);
-            } catch { /* ignore */ }
-        }
-
-        // اگر کاربر ویس فرستاده بود، پاسخ صوتی هم برایش بساز و بفرست
-        if (replyWithVoice) {
-            try {
-                await ctx.sendChatAction('record_voice');
-                const voiceBuffer = await textToSpeech(response);
-                if (voiceBuffer) {
-                    await ctx.replyWithVoice(
-                        { source: voiceBuffer },
-                        { caption: response.substring(0, 1024) }
+        try {
+            // callback برای آپدیت وضعیت
+            const onStatus = async (statusText) => {
+                try {
+                    await ctx.telegram.editMessageText(
+                        ctx.chat.id,
+                        statusMessage?.message_id,
+                        null,
+                        statusText
                     );
-                    return;
+                    await ctx.sendChatAction(replyWithVoice ? 'record_voice' : 'typing');
+                } catch { /* ignore edit errors */ }
+            };
+
+            // پردازش با Agent
+            const response = await processMessage(message, sessionId, onStatus);
+
+            // حذف پیام وضعیت
+            if (statusMessage) {
+                try {
+                    await ctx.telegram.deleteMessage(ctx.chat.id, statusMessage.message_id);
+                } catch { /* ignore */ }
+            }
+
+            // اگر کاربر ویس فرستاده بود، پاسخ صوتی هم برایش بساز و بفرست
+            if (replyWithVoice) {
+                try {
+                    await ctx.sendChatAction('record_voice');
+                    const voiceBuffer = await textToSpeech(response);
+                    if (voiceBuffer) {
+                        await ctx.replyWithVoice(
+                            { source: voiceBuffer },
+                            { caption: response.substring(0, 1024) }
+                        );
+                        return;
+                    }
+                } catch (ttsErr) {
+                    console.warn('⚠️ ارسال ویس با مشکل مواجه شد، ارسال متن:', ttsErr.message);
                 }
-            } catch (ttsErr) {
-                console.warn('⚠️ ارسال ویس با مشکل مواجه شد، ارسال متن:', ttsErr.message);
             }
-        }
 
-        // ارسال پاسخ متنی (با مدیریت حد کاراکتر تلگرام)
-        if (response.length <= 4096) {
-            await ctx.replyWithMarkdown(response).catch(() => ctx.reply(response));
-        } else {
-            // تقسیم پیام طولانی
-            const chunks = response.match(/.{1,4000}/gs) || [];
-            for (const chunk of chunks) {
-                await ctx.replyWithMarkdown(chunk).catch(() => ctx.reply(chunk));
+            // ارسال پاسخ متنی (با مدیریت حد کاراکتر تلگرام)
+            if (response.length <= 4096) {
+                await ctx.replyWithMarkdown(response).catch(() => ctx.reply(response));
+            } else {
+                // تقسیم پیام طولانی
+                const chunks = response.match(/.{1,4000}/gs) || [];
+                for (const chunk of chunks) {
+                    await ctx.replyWithMarkdown(chunk).catch(() => ctx.reply(chunk));
+                }
             }
-        }
 
-    } catch (error) {
-        console.error('❌ خطا در handleUserMessage:', error);
-        
-        if (statusMessage) {
-            try {
-                await ctx.telegram.deleteMessage(ctx.chat.id, statusMessage.message_id);
-            } catch { /* ignore */ }
+        } catch (error) {
+            console.error('❌ خطا در handleUserMessage:', error);
+            
+            if (statusMessage) {
+                try {
+                    await ctx.telegram.deleteMessage(ctx.chat.id, statusMessage.message_id);
+                } catch { /* ignore */ }
+            }
+            
+            await ctx.reply(`❌ خطایی رخ داد: ${error.message}\nلطفاً دوباره امتحان کن.`);
         }
-        
-        await ctx.reply(`❌ خطایی رخ داد: ${error.message}\nلطفاً دوباره امتحان کن.`);
-    } finally {
-        processingUsers.delete(userId);
-    }
+    };
+
+    const nextQueue = prevQueue
+        .then(currentOperation)
+        .catch(err => console.error('❌ خطا در صف پردازش پیام:', err))
+        .finally(() => {
+            if (userQueues.get(userId) === nextQueue) {
+                userQueues.delete(userId);
+            }
+        });
+
+    userQueues.set(userId, nextQueue);
+    return nextQueue;
 }
 
 // ──────────────────────────────────────────────────
