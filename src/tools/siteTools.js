@@ -25,12 +25,35 @@ if (SITE_API_URL && SITE_API_KEY && SITE_API_URL.includes('supabase.co')) {
     }
 }
 
+function checkServiceRole(key) {
+    if (!key) return false;
+    try {
+        if (key.includes('service_role')) return true;
+        if (key.startsWith('eyJ')) {
+            const parts = key.split('.');
+            if (parts.length >= 2) {
+                const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+                return payload.role === 'service_role';
+            }
+        }
+    } catch (e) {}
+    return false;
+}
+
+const hasServiceRole = checkServiceRole(SITE_API_KEY) || 
+                       checkServiceRole(process.env.SUPABASE_SERVICE_ROLE_KEY) || 
+                       checkServiceRole(process.env.SITE_SERVICE_ROLE_KEY);
+
+if (hasServiceRole) {
+    console.log('👑 کلید امنیتی سطح روت (Service Role Key) شناسایی شد - تمام محدودیت‌های RLS دور زده می‌شوند.');
+}
+
 let authPromise = null;
 /**
- * احراز هویت خودکار جهت دور زدن RLS بدون نیاز به مداخله دستی
+ * احراز هویت خودکار جهت دور زدن RLS در صورت استفاده از کلید معمولی (Anon)
  */
 async function ensureAuth() {
-    if (!supabase) return null;
+    if (!supabase || hasServiceRole) return null;
     try {
         const { data: sessionData } = await supabase.auth.getSession();
         if (sessionData?.session) return sessionData.session;
@@ -58,7 +81,7 @@ async function ensureAuth() {
     }
 }
 
-if (supabase) {
+if (supabase && !hasServiceRole) {
     ensureAuth().catch(() => {});
 }
 
@@ -116,7 +139,7 @@ async function fetchAllSupabaseUsers() {
         let authUsers = [];
         let profiles = [];
 
-        if (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SITE_SERVICE_ROLE_KEY) {
+        if (hasServiceRole) {
             try {
                 const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
                 if (data?.users) authUsers = data.users;
@@ -425,7 +448,7 @@ async function getUserProgress(userId) {
             }
 
             // ۶. اطلاعات سیستم Auth
-            if (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SITE_SERVICE_ROLE_KEY) {
+            if (hasServiceRole) {
                 try {
                     const { data: authData } = await supabase.auth.admin.getUserById(userId);
                     authUser = authData?.user || null;
