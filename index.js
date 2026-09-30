@@ -17,8 +17,8 @@ async function main() {
     const { createWebAppServer } = require('./src/server/webAppServer');
     const PORT = process.env.PORT || 3000;
     const app = createWebAppServer();
-    app.listen(PORT, () => {
-        console.log(`🌐 سرور داشبورد و مینی‌اپ تلگرام روی پورت ${PORT} فعال است.`);
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`🌐 سرور داشبورد و مینی‌اپ تلگرام روی پورت ${PORT} (0.0.0.0) فعال است.`);
         console.log(`📱 آدرس محلی داشبورد: http://localhost:${PORT}`);
     });
 
