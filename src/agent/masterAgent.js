@@ -315,13 +315,10 @@ const SYSTEM_PROMPT = `تو دستیار هوش مصنوعی شخصی من هس�
 دستورالعمل‌ها:
 1. همیشه به فارسی محاوره‌ای و روان پاسخ بده
 2. اگر برای انجام کاری نیاز به ابزار داری، حتماً از آن استفاده کن
-3. قانون راستی‌آزمایی اخبار و رویدادها (Multi-Source Verification):
-   • برای تأیید هر خبر، شایعه، موضوع روز یا ادعا، هرگز به یک منبع بسنده نکن!
-   • حتماً از ابزار جستجو استفاده کن و موضوع را در حداقل ۲ الی ۳ منبع مستقل و معتبر بررسی کن.
-   • در پاسخ، صراحتاً نام منابعی که خبر را تأیید یا رد کرده‌اند ذکر کن.
-   • اگر بین منابع اختلاف وجود دارد یا هنوز منبع رسمی آن را تأیید نکرده، حتماً اعلام کن که «خبر هنوز رسماً تأیید نشده» یا «در حد شایعه است».
-   • تاریخ اخبار را چک کن تا اخبار قدیمی را به جای خبر جدید ارائه ندهی.
-4. پاسخ‌ها رو دقیق، مستند و مفید نگه دار
+3. جستجو و پاسخگویی به اخبار و اطلاعات:
+   • در صورت نیاز به بررسی وب، با یک جستجوی دقیق و سریع کار را جمع کن و از خواندن صفحات متعدد یا چرخه‌های طولانی خودداری کن مگر اینکه کاربر صراحتاً بررسی عمیق بخواهد.
+   • تاریخ اخبار را در نظر بگیر و به شایعات بی‌اساس تکیه نکن.
+4. پاسخ‌ها رو خلاصه، مفید، دقیق و خودمونی نگه دار (از پرگویی بی‌مورد بپرهیز)
 5. اگر اطلاعاتی رو در حافظه ذخیره می‌کنی، به کاربر با لحن دوستانه اطلاع بده
 6. در مورد اطلاعات حساس محتاط باش
 
@@ -343,8 +340,9 @@ async function processMessage(userMessage, sessionId = 'default', onStatus = nul
             platform: 'telegram',
         });
 
-        // دریافت تاریخچه مکالمه
-        const history = conversations.getHistory.all(sessionId, 20);
+        // دریافت تاریخچه مکالمه (تنظیم روی حداکثر 4 پیام قبلی برای صرفه‌جویی شدید در مصرف توکن)
+        // مقدار 5 خوانده می‌شود چون پیام جاری کاربر در دیتابیس ثبت شده و با slice(0, -1) دقیقاً 4 پیام قبلی باقی می‌ماند
+        const history = conversations.getHistory.all(sessionId, 5);
 
         // ساختن context پیام‌ها با فرمت استاندارد
         const openAITools = toolDeclarations.map(t => ({ type: 'function', function: t }));
@@ -352,11 +350,16 @@ async function processMessage(userMessage, sessionId = 'default', onStatus = nul
             { role: 'system', content: SYSTEM_PROMPT }
         ];
 
-        // اضافه کردن تاریخچه
+        // اضافه کردن تاریخچه (حداکثر 4 پیام اخیر)
         for (const msg of history.slice(0, -1)) {
+            let content = msg.content || '';
+            // جلوگیری از مصرف بیهوده توکن اگر پاسخ قبلی دستیار خیلی طولانی (مثل جدول یا لیست کاربران) بوده است
+            if (msg.role === 'assistant' && content.length > 500) {
+                content = content.substring(0, 500) + '... [خلاصه شد]';
+            }
             messages.push({
                 role: msg.role === 'assistant' ? 'assistant' : 'user',
-                content: msg.content
+                content: content
             });
         }
 
@@ -369,8 +372,7 @@ async function processMessage(userMessage, sessionId = 'default', onStatus = nul
         const { askAI } = require('./aiRouter');
 
         // ─── حلقه اجرای Agent با Tool Calling ───
-        // اولویت: ۱. Groq ➔ ۲. OpenRouter ➔ ۳. Gemini
-        let maxIterations = 10; // جلوگیری از حلقه بی‌نهایت
+        let maxIterations = 3; // کاهش سقف چرخه به ۳ برای جلوگیری از مصرف تصاعدی توکن و خطای لیمیت
         let iterationCount = 0;
         let finalResponse = '';
 

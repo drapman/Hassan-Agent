@@ -26,8 +26,7 @@ const activeHumanChats = new Map(); // مخاطبانی که خود پوریا �
  * @param {object} botInstance - نمونه ربات اصلی تلگرام برای ارسال اعلان به مالک
  */
 async function startUserbot(botInstance = null) {
-    if (!session) {
-        console.log('ℹ️  منشی اکانت شخصی (Userbot) تنظیم نشده است. (TELEGRAM_USER_SESSION خالی است)');
+    if (process.env.TELEGRAM_AUTO_REPLY === 'false' || !session) {
         return null;
     }
 
@@ -205,7 +204,7 @@ async function startUserbot(botInstance = null) {
                 try {
                     const messagesForAI = [
                         { role: 'system', content: systemInstruction },
-                        ...sessionData.history.slice(-8)
+                        ...sessionData.history.slice(-4)
                     ];
 
                     autoReply = await askAI({

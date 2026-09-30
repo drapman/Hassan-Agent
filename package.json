@@ -24,6 +24,7 @@
     "cheerio": "^1.0.0",
     "dotenv": "^16.3.0",
     "edge-tts-node": "^1.5.7",
+    "express": "^5.2.1",
     "imap": "^0.8.19",
     "input": "^1.0.1",
     "mailparser": "^3.6.0",

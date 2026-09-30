@@ -136,14 +136,18 @@ const conversationOps = {
     `),
 
     /**
-     * دریافت تاریخچه مکالمه (آخرین N پیام)
+     * دریافت تاریخچه مکالمه (آخرین N پیام به ترتیب زمانی)
      */
     getHistory: db.prepare(`
         SELECT role, content, created_at 
-        FROM conversations 
-        WHERE session_id = ?
-        ORDER BY created_at ASC
-        LIMIT ?
+        FROM (
+            SELECT id, role, content, created_at 
+            FROM conversations 
+            WHERE session_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        )
+        ORDER BY id ASC
     `),
 
     /**

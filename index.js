@@ -13,44 +13,35 @@ async function main() {
     console.log('║   دستیار هوش مصنوعی شخصی          ║');
     console.log('╚════════════════════════════════════╝\n');
 
-    // راه‌اندازی سرور سلامتی برای هاست‌های ابری (Render / Koyeb / Railway)
-    const http = require('http');
+    // راه‌اندازی سرور مینی‌اپ تلگرام (Telegram Mini App) و داشبورد مدیریت
+    const { createWebAppServer } = require('./src/server/webAppServer');
     const PORT = process.env.PORT || 3000;
-    http.createServer((req, res) => {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-            status: 'ok',
-            agent: 'Hassan AI Agent',
-            uptime: Math.floor(process.uptime()),
-            timestamp: new Date().toISOString()
-        }));
-    }).listen(PORT, () => {
-        console.log(`🌐 سرور سلامتی برای هاست ابری روی پورت ${PORT} فعال است.`);
+    const app = createWebAppServer();
+    app.listen(PORT, () => {
+        console.log(`🌐 سرور داشبورد و مینی‌اپ تلگرام روی پورت ${PORT} فعال است.`);
+        console.log(`📱 آدرس محلی داشبورد: http://localhost:${PORT}`);
     });
 
-    try {
-        await startBot();
-
-        const { bot } = require('./src/telegram/bot');
-
-        // راه‌اندازی دیده‌بان زنده کاربران جدید سایت (اعلان فوری ثبت‌نام به تلگرام)
-        const { startNewUserWatcher } = require('./src/watchers/newUserWatcher');
-        startNewUserWatcher(bot);
-
-        // راه‌اندازی منشی هوشمند اکانت شخصی تلگرام (Userbot)
-        const { startUserbot } = require('./src/userbot/userbot');
-        await startUserbot(bot);
-    } catch (error) {
-        console.error('❌ خطا در راه‌اندازی:', error.message);
-        
-        if (error.message.includes('401')) {
-            console.error('⚠️  توکن بات اشتباه است. TELEGRAM_BOT_TOKEN را در .env بررسی کنید.');
-        } else if (error.message.includes('GEMINI')) {
-            console.error('⚠️  GEMINI_API_KEY نامعتبر است. کلید API را بررسی کنید.');
+    async function launchBotWithRetry(retries = 5) {
+        try {
+            await startBot();
+            const { bot } = require('./src/telegram/bot');
+            const { startNewUserWatcher } = require('./src/watchers/newUserWatcher');
+            startNewUserWatcher(bot);
+        } catch (error) {
+            console.error('❌ خطا در اتصال به تلگرام:', error.message);
+            if (error.message.includes('401')) {
+                console.error('⚠️ توکن بات اشتباه است. TELEGRAM_BOT_TOKEN را در .env بررسی کنید.');
+            } else if (retries > 0) {
+                console.log(`🔄 تلاش مجدد برای اتصال به تلگرام تا ۵ ثانیه دیگر... (${retries} تلاش باقی‌مانده)`);
+                setTimeout(() => launchBotWithRetry(retries - 1), 5000);
+            } else {
+                console.warn('⚠️ اتصال به تلگرام ناموفق بود، اما سرور وب و مینی‌اپ همچنان در حال اجراست.');
+            }
         }
-        
-        process.exit(1);
     }
+
+    launchBotWithRetry();
 }
 
 main();

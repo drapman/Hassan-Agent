@@ -25,20 +25,30 @@ async function sendNewUserAlert(bot, user) {
 
     notifiedUsers.add(userId);
 
-    const name = user.full_name || user.name || user.username || user.display_name || 'نام مشخص نشده';
-    const email = user.email || 'ایمیل ثبت نشده';
+    const rawName = user.full_name || user.name || user.username || user.display_name || 'نام مشخص نشده';
+    const rawEmail = user.email || 'ایمیل ثبت نشده';
+    const cleanName = String(rawName).replace(/[_*[\]()~`>#+\-=|{}.!]/g, ' ');
+    const cleanEmail = String(rawEmail);
     const time = user.created_at ? new Date(user.created_at).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' }) : new Date().toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' });
 
     const message = `🎉 *رئیس، یه کاربر جدید تو سایت عضو شد!*\n\n` +
-        `👤 *نام / کاربری:* ${name}\n` +
-        `📧 *ایمیل:* \`${email}\`\n` +
+        `👤 *نام / کاربری:* ${cleanName}\n` +
+        `📧 *ایمیل:* \`${cleanEmail}\`\n` +
         `🆔 *شناسه:* \`${userId}\`\n` +
         `🕒 *زمان ثبت‌نام:* ${time}\n\n` +
         `_می‌تونی از من بخوای پیشرفتش رو برات چک کنم یا بهش پیام بفرستی!_ 😉`;
 
     try {
-        await bot.telegram.sendMessage(ownerId, message, { parse_mode: 'Markdown' });
-        console.log(`📢 اعلان ثبت‌نام کاربر ${email} به تلگرام ارسال شد.`);
+        await bot.telegram.sendMessage(ownerId, message, { parse_mode: 'Markdown' }).catch(async (e) => {
+            console.warn('⚠️ خطای Markdown در ارسال اعلان، ارسال به صورت متن ساده:', e.message);
+            const plainMessage = `🎉 رئیس، یه کاربر جدید تو سایت عضو شد!\n\n` +
+                `👤 نام / کاربری: ${rawName}\n` +
+                `📧 ایمیل: ${rawEmail}\n` +
+                `🆔 شناسه: ${userId}\n` +
+                `🕒 زمان ثبت‌نام: ${time}`;
+            await bot.telegram.sendMessage(ownerId, plainMessage);
+        });
+        console.log(`📢 اعلان ثبت‌نام کاربر ${cleanEmail} به تلگرام ارسال شد.`);
     } catch (err) {
         console.error('❌ خطا در ارسال اعلان کاربر جدید به تلگرام:', err.message);
     }

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Hassan Agent | داشبورد مدیریت</title>
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Google Fonts: Vazirmatn -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top App Bar -->
+        <header class="top-header">
+            <div class="brand">
+                <div class="avatar-glow">
+                    <span class="avatar-icon">🤖</span>
+                    <span class="status-pulse" id="statusIndicator"></span>
+                </div>
+                <div class="brand-text">
+                    <h1 class="brand-title">Hassan Agent</h1>
+                    <span class="brand-subtitle" id="userGreeting">داشبورد هوشمند مدیریت</span>
+                </div>
+            </div>
+            <button class="icon-btn" id="refreshBtn" title="بروزرسانی داده‌ها" aria-label="بروزرسانی">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                </svg>
+            </button>
+        </header>
+
+        <!-- Stat Cards Grid -->
+        <section class="stats-grid">
+            <div class="stat-card stat-users">
+                <div class="stat-icon">👥</div>
+                <div class="stat-info">
+                    <span class="stat-label">کل کاربران سایت</span>
+                    <span class="stat-value" id="statTotalUsers">---</span>
+                </div>
+            </div>
+            <div class="stat-card stat-active">
+                <div class="stat-icon">⚡</div>
+                <div class="stat-info">
+                    <span class="stat-label">وضعیت دیتابیس</span>
+                    <span class="stat-value small-text" id="statDbStatus">Supabase</span>
+                </div>
+            </div>
+            <div class="stat-card stat-time">
+                <div class="stat-icon">🕒</div>
+                <div class="stat-info">
+                    <span class="stat-label">آپ‌تایم سرور</span>
+                    <span class="stat-value" id="statUptime">---</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Navigation Tabs -->
+        <nav class="tabs-nav">
+            <button class="tab-btn active" data-tab="tab-users">
+                <span>👥</span>
+                <span>کاربران سایت</span>
+            </button>
+            <button class="tab-btn" data-tab="tab-currency">
+                <span>💰</span>
+                <span>نرخ ارز و طلا</span>
+            </button>
+            <button class="tab-btn" data-tab="tab-system">
+                <span>⚙️</span>
+                <span>وضعیت ربات</span>
+            </button>
+        </nav>
+
+        <!-- Main Tab Contents -->
+        <main class="tabs-content">
+            <!-- TAB 1: USERS -->
+            <section class="tab-pane active" id="tab-users">
+                <div class="search-box">
+                    <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" id="userSearchInput" placeholder="جستجوی نام، ایمیل یا آیدی..." autocomplete="off">
+                    <button class="clear-search-btn" id="clearSearchBtn" style="display: none;">×</button>
+                </div>
+
+                <div class="section-header">
+                    <h2 class="section-title">لیست کاربران (<span id="userCount">0</span>)</h2>
+                    <span class="section-badge" id="sourceBadge">Supabase Auth</span>
+                </div>
+
+                <div class="users-list" id="usersListContainer">
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>در حال دریافت اطلاعات کاربران...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 2: CURRENCY -->
+            <section class="tab-pane" id="tab-currency">
+                <div class="section-header">
+                    <h2 class="section-title">نرخ لحظه‌ای بازار آزاد تهران</h2>
+                    <span class="section-badge" id="currencyUpdatedTime">بروزرسانی زنده</span>
+                </div>
+                <div class="currency-grid" id="currencyContainer">
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>در حال استعلام قیمت‌ها از شبکه طلا و ارز...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 3: SYSTEM -->
+            <section class="tab-pane" id="tab-system">
+                <div class="system-card">
+                    <h3>🤖 هویت Agent</h3>
+                    <p class="system-desc">دستیار هوشمند شخصی با اتصال مستقیم به دیتابیس Supabase و مدل زبانی Google Gemini Flash</p>
+                    <div class="system-meta-row">
+                        <span>سرویس هوش مصنوعی:</span>
+                        <span class="meta-tag active-tag">Google Gemini Flash-Lite</span>
+                    </div>
+                    <div class="system-meta-row">
+                        <span>منشی چت شخصی:</span>
+                        <span class="meta-tag inactive-tag">غیرفعال (جهت حفظ توکن)</span>
+                    </div>
+                    <div class="system-meta-row">
+                        <span>پایشگر زنده ثبت‌نام‌ها:</span>
+                        <span class="meta-tag active-tag">فعال (Realtime Watcher)</span>
+                    </div>
+                    <div class="system-meta-row">
+                        <span>سرور مینی‌اپ:</span>
+                        <span class="meta-tag active-tag">Express API آنلاین</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- User Details & Tasks Modal -->
+        <div class="modal-overlay" id="userModal" style="display: none;">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <div class="modal-header-user">
+                        <div class="modal-avatar" id="modalAvatar">👤</div>
+                        <div>
+                            <h3 class="modal-title" id="modalUserName">پروفایل کاربر</h3>
+                            <span class="modal-subtitle" id="modalUserSubtitle">@username</span>
+                        </div>
+                    </div>
+                    <button class="modal-close-btn" id="closeModalBtn">&times;</button>
+                </div>
+
+                <div class="modal-body">
+                    <!-- Basic Meta Info -->
+                    <div class="user-meta-field">
+                        <span class="label">شناسه کاربر:</span>
+                        <div class="code-copy-wrapper">
+                            <code class="value code-val" id="modalUserId">---</code>
+                            <button class="copy-btn" id="copyIdBtn" title="کپی آیدی">📋</button>
+                        </div>
+                    </div>
+                    <div class="user-meta-field">
+                        <span class="label">ایمیل:</span>
+                        <span class="value" id="modalUserEmail">---</span>
+                    </div>
+                    <div class="user-meta-field">
+                        <span class="label">تاریخ عضویت:</span>
+                        <span class="value" id="modalUserJoined">---</span>
+                    </div>
+                    <div class="user-meta-field">
+                        <span class="label">آخرین فعالیت:</span>
+                        <span class="value" id="modalUserLastActive">---</span>
+                    </div>
+
+                    <!-- Progress & Gamification Stats Grid -->
+                    <div class="user-stats-grid">
+                        <div class="mini-stat-card">
+                            <span class="mini-icon">⚡</span>
+                            <span class="mini-val" id="userXp">0</span>
+                            <span class="mini-lbl">امتیاز XP</span>
+                        </div>
+                        <div class="mini-stat-card">
+                            <span class="mini-icon">🔥</span>
+                            <span class="mini-val" id="userStreak">0 روز</span>
+                            <span class="mini-lbl">زنجیره تمرین</span>
+                        </div>
+                        <div class="mini-stat-card">
+                            <span class="mini-icon">🎓</span>
+                            <span class="mini-val" id="userLevel">مبتدی</span>
+                            <span class="mini-lbl">سطح تسلط</span>
+                        </div>
+                        <div class="mini-stat-card">
+                            <span class="mini-icon">🎵</span>
+                            <span class="mini-val" id="userSongs">0</span>
+                            <span class="mini-lbl">آهنگ‌های کامل</span>
+                        </div>
+                        <div class="mini-stat-card">
+                            <span class="mini-icon">🏆</span>
+                            <span class="mini-val" id="userQuizzes">0</span>
+                            <span class="mini-lbl">قبولی کوییز</span>
+                        </div>
+                        <div class="mini-stat-card">
+                            <span class="mini-icon">🗂️</span>
+                            <span class="mini-val" id="userLeitnerCount">0</span>
+                            <span class="mini-lbl">کلمات لایتنر</span>
+                        </div>
+                    </div>
+
+                    <!-- Musical Interests & Badges -->
+                    <div class="tags-container" id="userInterestsContainer"></div>
+
+                    <!-- Daily Missions & Tasks Section -->
+                    <div class="tasks-section-header">
+                        <h4 class="sub-title">🎯 ماموریت‌ها و تسک‌های روزانه</h4>
+                        <span class="section-badge" id="dailyMissionsBadge">در حال بررسی...</span>
+                    </div>
+                    <div class="daily-missions-list" id="modalMissionsList">
+                        <div class="loading-state-small">
+                            <p>در حال دریافت تسک‌های روزانه...</p>
+                        </div>
+                    </div>
+
+                    <hr class="modal-divider">
+
+                    <!-- Tasks & Leitner Cards Section -->
+                    <div class="tasks-section-header">
+                        <h4 class="sub-title">📚 واژگان و کارت‌های جعبه لایتنر</h4>
+                        <span class="section-badge" id="leitnerCardCount">0 کلمه</span>
+                    </div>
+                    
+                    <div class="leitner-cards-list" id="modalLeitnerList">
+                        <div class="loading-state-small">
+                            <p>در حال دریافت گزارش تسک‌ها...</p>
+                        </div>
+                    </div>
+
+                    <!-- Achievements Section -->
+                    <div class="achievements-section" id="modalAchievementsWrapper" style="display:none;">
+                        <hr class="modal-divider">
+                        <h4 class="sub-title">🏆 دستاوردها و مدال‌های کسب شده</h4>
+                        <div class="tags-container" id="modalAchievementsList"></div>
+                    </div>
+
+                    <hr class="modal-divider">
+
+                    <!-- Send Message Section -->
+                    <h4 class="sub-title">📩 ارسال پیام مستقیم به کاربر</h4>
+                    <div class="input-group">
+                        <textarea id="modalMsgText" rows="2" placeholder="متن پیام به کاربر در سایت..."></textarea>
+                    </div>
+                    <div class="action-row">
+                        <select id="modalMsgType" class="select-type">
+                            <option value="info">اطلاع‌رسانی (Info)</option>
+                            <option value="success">تشویقی / موفقیت (Success)</option>
+                            <option value="warning">هشدار (Warning)</option>
+                        </select>
+                        <button class="btn btn-primary" id="sendMsgBtn">ارسال پیام</button>
+                    </div>
+
+                    <hr class="modal-divider">
+
+                    <!-- Internal Note Section -->
+                    <h4 class="sub-title">📝 یادداشت داخلی ادمین</h4>
+                    <div class="input-group">
+                        <input type="text" id="modalNoteText" placeholder="ثبت یادداشت برای سوابق این کاربر...">
+                    </div>
+                    <button class="btn btn-secondary" id="saveNoteBtn">ذخیره یادداشت</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notifications -->
+        <div class="toast-container" id="toastContainer"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

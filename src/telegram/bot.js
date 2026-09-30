@@ -86,13 +86,7 @@ bot.command('start', async (ctx) => {
 • "بلیط تهران به مشهد فردا جستجو کن"
 • "نرخ دلار چنده؟"`;
 
-    await ctx.replyWithMarkdown(welcomeMsg,
-        Markup.keyboard([
-            ['📊 کاربران جدید', '📧 ایمیل‌ها'],
-            ['💱 نرخ ارز', '✈️ بلیط'],
-            ['🔄 شروع مجدد', '❓ راهنما'],
-        ]).resize()
-    );
+    await ctx.replyWithMarkdown(welcomeMsg, getMainKeyboard());
 });
 
 // /help - راهنما
@@ -167,18 +161,66 @@ bot.command('memory', async (ctx) => {
 });
 
 // ──────────────────────────────────────────────────
-// Keyboard Button Handlers
+// Keyboard Button Handlers (پاسخ مستقیم بدون مصرف توکن هوش مصنوعی)
 // ──────────────────────────────────────────────────
 bot.hears('📊 کاربران جدید', async (ctx) => {
-    await handleUserMessage(ctx, 'لیست کاربران جدید سایت رو در 7 روز گذشته نشون بده');
+    try {
+        const { getNewUsers } = require('../tools/siteTools');
+        await ctx.sendChatAction('typing');
+        const res = await getNewUsers(5, 7);
+        if (res.success && res.users && res.users.length > 0) {
+            let msg = `👥 *کاربران جدید اخیر سایت (${res.users.length} نفر):*\n\n`;
+            res.users.slice(0, 5).forEach((u, idx) => {
+                const name = u.full_name || u.username || u.name || 'بدون نام';
+                const email = u.email || 'بدون ایمیل';
+                msg += `${idx + 1}. *${name}*\n📧 \`${email}\`\n\n`;
+            });
+            await ctx.replyWithMarkdown(msg);
+        } else {
+            await ctx.reply('ℹ️ کاربر جدیدی در ۷ روز گذشته یافت نشد یا دیتابیس در دسترس نیست.');
+        }
+    } catch (err) {
+        await ctx.reply(`❌ خطا در دریافت کاربران: ${err.message}`);
+    }
 });
 
 bot.hears('📧 ایمیل‌ها', async (ctx) => {
-    await handleUserMessage(ctx, '10 تا ایمیل آخر رو نشون بده');
+    try {
+        const { getEmails } = require('../tools/emailTools');
+        await ctx.sendChatAction('typing');
+        const emailRes = await getEmails(5, 'INBOX', false);
+        if (emailRes.success && emailRes.emails && emailRes.emails.length > 0) {
+            let msg = `📬 *آخرین ایمیل‌های صندوق ورودی (${emailRes.emails.length} مورد):*\n\n`;
+            emailRes.emails.slice(0, 5).forEach((em, idx) => {
+                msg += `${idx + 1}. *از:* ${em.from}\n📌 *موضوع:* ${em.subject}\n\n`;
+            });
+            await ctx.replyWithMarkdown(msg);
+        } else {
+            await ctx.reply(emailRes.error ? `⚠️ خطا در اتصال به ایمیل: ${emailRes.error}` : '📭 ایمیلی یافت نشد.');
+        }
+    } catch (err) {
+        await ctx.reply(`❌ خطا در بررسی ایمیل: ${err.message}`);
+    }
 });
 
 bot.hears('💱 نرخ ارز', async (ctx) => {
-    await handleUserMessage(ctx, 'نرخ ارزها رو بهم بگو');
+    try {
+        const { getCurrencyRates } = require('../tools/webTools');
+        await ctx.sendChatAction('typing');
+        const ratesResult = await getCurrencyRates();
+        if (ratesResult.success && ratesResult.rates) {
+            let msg = `💰 *نرخ لحظه‌ای ارز و طلا (${ratesResult.market || 'بازار آزاد'}):*\n\n`;
+            for (const [k, v] of Object.entries(ratesResult.rates)) {
+                msg += `• *${k}:* ${v}\n`;
+            }
+            msg += `\n🕒 بروزرسانی: ${ratesResult.updated || new Date().toLocaleTimeString('fa-IR', { timeZone: 'Asia/Tehran' })}`;
+            await ctx.replyWithMarkdown(msg);
+        } else {
+            await ctx.reply('⚠️ متأسفانه در حال حاضر امکان دریافت قیمت‌های لحظه‌ای میسر نشد.');
+        }
+    } catch (err) {
+        await ctx.reply(`❌ خطا در دریافت نرخ ارز: ${err.message}`);
+    }
 });
 
 bot.hears('✈️ بلیط', async (ctx) => {
@@ -196,6 +238,54 @@ bot.hears('❓ راهنما', async (ctx) => {
     await bot.telegram.sendMessage(ctx.chat.id, '/help');
 });
 
+// هندلر باز کردن داشبورد مدیریت و مینی‌اپ
+bot.hears('📱 داشبورد مدیریت', async (ctx) => {
+    await sendDashboardLink(ctx);
+});
+
+bot.command(['dashboard', 'app', 'panel'], async (ctx) => {
+    await sendDashboardLink(ctx);
+});
+
+function getMainKeyboard() {
+    const webAppUrl = process.env.WEBAPP_URL;
+    const rows = [];
+    if (webAppUrl && webAppUrl.startsWith('https://')) {
+        rows.push([Markup.button.webApp('📱 داشبورد مدیریت', webAppUrl)]);
+    } else {
+        rows.push(['📱 داشبورد مدیریت']);
+    }
+    rows.push(['📊 کاربران جدید', '📧 ایمیل‌ها']);
+    rows.push(['💱 نرخ ارز', '✈️ بلیط']);
+    rows.push(['🔄 شروع مجدد', '❓ راهنما']);
+    return Markup.keyboard(rows).resize();
+}
+
+async function sendDashboardLink(ctx) {
+    const webAppUrl = process.env.WEBAPP_URL;
+    if (webAppUrl && webAppUrl.startsWith('https://')) {
+        await ctx.reply(
+            '📱 *داشبورد مینی‌اپ تلگرام Hassan Agent*\n\nبرای دسترسی به پنل مدیریت کاربران، آمار زنده دیتابیس و نرخ ارز با مصرف صفر توکن، دکمه زیر را لمس کنید:',
+            {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [Markup.button.webApp('🚀 باز کردن داشبورد مدیریت', webAppUrl)]
+                ])
+            }
+        );
+    } else {
+        const localPort = process.env.PORT || 3000;
+        await ctx.reply(
+            `📱 *داشبورد مدیریت آماده است!*\n\n` +
+            `🌐 *آدرس مرورگر محلی:* http://localhost:${localPort}\n\n` +
+            `ℹ️ *نکته جهت باز شدن مستقیم داخل تلگرام:*\n` +
+            `تلگرام برای Mini App نیاز به لینک امن (\`https://\`) دارد. اگر ربات را روی سرور ابری (مثل Render، Railway یا Koyeb) اجرا کرده‌اید یا از تونل استفاده می‌کنید، کافیست آدرس آن را در متغیر \`WEBAPP_URL\` فایل \`.env\` قرار دهید.\n\n` +
+            `هم‌اکنون می‌توانید از طریق مرورگر مستقیماً وارد آدرس محلی شوید!`,
+            { parse_mode: 'Markdown' }
+        );
+    }
+}
+
 // ──────────────────────────────────────────────────
 // Main Message Handlers
 // ──────────────────────────────────────────────────
@@ -211,7 +301,7 @@ bot.on('text', async (ctx) => {
 // هندلر صدا و پیام ویدیویی (شنیدن ویس کاربر و پاسخ صوتی دوطرفه)
 bot.on(['voice', 'audio', 'video_note'], async (ctx) => {
     const userId = ctx.from.id;
-    if (processingUsers.has(userId)) {
+    if (userQueues.has(userId)) {
         await ctx.reply('⏳ صبر کن، هنوز دارم روی پیام قبلیت کار می‌کنم...');
         return;
     }
@@ -256,21 +346,31 @@ async function handleUserMessage(ctx, message, replyWithVoice = false) {
     const currentOperation = async () => {
         const sessionId = `telegram_${userId}`;
         let statusMessage = null;
+        let statusTimer = setTimeout(async () => {
+            try {
+                statusMessage = await ctx.reply('🤔 در حال بررسی...');
+            } catch { /* ignore */ }
+        }, 2000);
+
         try {
             await ctx.sendChatAction(replyWithVoice ? 'record_voice' : 'typing');
-            statusMessage = await ctx.reply('🤔 در حال بررسی...');
         } catch { /* ignore */ }
 
         try {
             // callback برای آپدیت وضعیت
             const onStatus = async (statusText) => {
                 try {
-                    await ctx.telegram.editMessageText(
-                        ctx.chat.id,
-                        statusMessage?.message_id,
-                        null,
-                        statusText
-                    );
+                    if (!statusMessage) {
+                        clearTimeout(statusTimer);
+                        statusMessage = await ctx.reply(statusText);
+                    } else {
+                        await ctx.telegram.editMessageText(
+                            ctx.chat.id,
+                            statusMessage.message_id,
+                            null,
+                            statusText
+                        );
+                    }
                     await ctx.sendChatAction(replyWithVoice ? 'record_voice' : 'typing');
                 } catch { /* ignore edit errors */ }
             };
@@ -278,7 +378,9 @@ async function handleUserMessage(ctx, message, replyWithVoice = false) {
             // پردازش با Agent
             const response = await processMessage(message, sessionId, onStatus);
 
-            // حذف پیام وضعیت
+            clearTimeout(statusTimer);
+
+            // حذف پیام وضعیت در صورت وجود
             if (statusMessage) {
                 try {
                     await ctx.telegram.deleteMessage(ctx.chat.id, statusMessage.message_id);
@@ -314,6 +416,7 @@ async function handleUserMessage(ctx, message, replyWithVoice = false) {
             }
 
         } catch (error) {
+            clearTimeout(statusTimer);
             console.error('❌ خطا در handleUserMessage:', error);
             
             if (statusMessage) {

@@ -25,7 +25,43 @@ async function transcribeAudio(audioBuffer, mimeType = 'audio/ogg') {
     let cleanMime = (mimeType || 'audio/ogg').split(';')[0].trim().toLowerCase();
     if (cleanMime === 'audio/opus') cleanMime = 'audio/ogg';
 
-    // ۱. تلاش با Groq Whisper (فوق‌العاده سریع و دقیق در فارسی)
+    // ۱. تلاش با Google Gemini (بسیار سریع، دقیق و بدون تحریم)
+    if (process.env.GEMINI_API_KEY) {
+        try {
+            console.log('🎙️ در حال پیاده‌سازی متن فایل صوتی با Google Gemini...');
+            if (!geminiClient) geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+            const response = await geminiClient.models.generateContent({
+                model: 'gemini-flash-lite-latest',
+                contents: [
+                    {
+                        role: 'user',
+                        parts: [
+                            {
+                                inlineData: {
+                                    mimeType: cleanMime,
+                                    data: audioBuffer.toString('base64')
+                                }
+                            },
+                            {
+                                text: 'لطفاً صدای موجود در این فایل را دقیق و کلمه به کلمه به زبان فارسی پیاده‌سازی کن. فقط و فقط متن گفتار را بنویس و هیچ توضیح اضافه‌ای نده.'
+                            }
+                        ]
+                    }
+                ]
+            });
+
+            const text = response.text?.trim();
+            if (text) {
+                console.log(`✅ متن ویس استخراج شد (Gemini): "${text}"`);
+                return text;
+            }
+        } catch (geminiErr) {
+            console.warn('⚠️ خطای Gemini در استخراج متن صوت:', geminiErr.message);
+        }
+    }
+
+    // ۲. فال‌بک با Groq Whisper (در صورت در دسترس بودن)
     if (process.env.GROQ_API_KEY) {
         try {
             console.log('🎙️ در حال پیاده‌سازی متن فایل صوتی با Groq Whisper...');
@@ -57,42 +93,6 @@ async function transcribeAudio(audioBuffer, mimeType = 'audio/ogg') {
             }
         } catch (groqErr) {
             console.warn('⚠️ خطای ارتباط با Groq Whisper:', groqErr.message);
-        }
-    }
-
-    // ۲. فال‌بک با Google Gemini
-    if (process.env.GEMINI_API_KEY) {
-        try {
-            console.log('🎙️ در حال پیاده‌سازی متن فایل صوتی با Google Gemini...');
-            if (!geminiClient) geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-            const response = await geminiClient.models.generateContent({
-                model: 'gemini-3.8-flash',
-                contents: [
-                    {
-                        role: 'user',
-                        parts: [
-                            {
-                                inlineData: {
-                                    mimeType: cleanMime,
-                                    data: audioBuffer.toString('base64')
-                                }
-                            },
-                            {
-                                text: 'لطفاً صدای موجود در این فایل را دقیق و کلمه به کلمه به زبان فارسی پیاده‌سازی کن. فقط و فقط متن گفتار را بنویس و هیچ توضیح اضافه‌ای نده.'
-                            }
-                        ]
-                    }
-                ]
-            });
-
-            const text = response.text?.trim();
-            if (text) {
-                console.log(`✅ متن ویس استخراج شد (Gemini): "${text}"`);
-                return text;
-            }
-        } catch (geminiErr) {
-            console.warn('⚠️ خطای Gemini در استخراج متن صوت:', geminiErr.message);
         }
     }
 

@@ -19,7 +19,7 @@ const { log } = require('../database/db');
  * @param {string} query - کلمه جستجو
  * @param {number} maxResults - حداکثر نتایج
  */
-async function searchWeb(query, maxResults = 5) {
+async function searchWeb(query, maxResults = 3) {
     try {
         const cheerio = require('cheerio');
         const response = await axios.get('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query), {
@@ -77,7 +77,7 @@ async function readWebPage(url) {
             .replace(/\s+/g, ' ')
             .replace(/\n+/g, '\n')
             .trim()
-            .substring(0, 3000); // حداکثر 3000 کاراکتر
+            .substring(0, 1000); // کاهش سقف به 1000 کاراکتر برای صرفه‌جویی شدید در توکن
 
         log.log.run('READ_WEBPAGE', `خواندن: ${url}`, `${cleanText.length} کاراکتر`, 1);
         return { success: true, url, title, content: cleanText };

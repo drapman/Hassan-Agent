@@ -96,9 +96,10 @@ async function getNewUsers(limit = 10, days = 7) {
                         users = profilesData;
                     } else {
                         // ادغام دیتابیس با سیستم Auth
+                        // توجه: داده‌های Auth (مانند email) باید اولویت داشته باشن
                         users = users.map(u => {
                             const prof = profilesData.find(p => p.id === u.id || p.email === u.email);
-                            return prof ? { ...u, ...prof } : u;
+                            return prof ? { ...prof, ...u } : u;
                         });
                     }
                 }
@@ -195,33 +196,133 @@ async function searchUser(query) {
 }
 
 /**
- * دریافت پیشرفت کاربر
+ * دریافت پیشرفت کامل و ریز جزئیات تسک‌ها و یادگیری کاربر
  * @param {string} userId - آیدی کاربر
  */
 async function getUserProgress(userId) {
     try {
         let profile = null;
+        let authUser = null;
+        let leitnerCards = [];
+        let achievements = [];
 
         if (supabase) {
-            const { data, error } = await supabase
+            // ۱. اطلاعات پروفایل و امتیازات
+            const { data: prof, error: profErr } = await supabase
                 .from('profiles')
                 .select('*')
                 .eq('id', userId)
-                .single();
+                .maybeSingle();
+            if (!profErr && prof) profile = prof;
 
-            if (!error && data) {
-                profile = data;
+            // ۲. کلمات و کارت‌های لایتنر (تسک‌های یادگیری)
+            const { data: cards } = await supabase
+                .from('leitner_cards')
+                .select('*')
+                .eq('user_id', userId)
+                .order('created_at', { ascending: false })
+                .limit(20);
+            leitnerCards = cards || [];
+
+            // ۳. دستاوردها و مدال‌ها
+            const { data: achs } = await supabase
+                .from('user_achievements')
+                .select('*')
+                .eq('user_id', userId);
+            achievements = (achs || []).map(a => {
+                const map = {
+                    'early_bird': { title: 'سحرخیز 🌅', desc: 'شروع زودهنگام تمرین روزانه' },
+                    'first_quiz': { title: 'اولین کوییز 🎯', desc: 'پاس کردن موفقیت‌آمیز آزمون اول' },
+                    'word_master': { title: 'استاد واژگان 📚', desc: 'تکمیل مرور کلمات لایتنر' },
+                    'streak_3': { title: 'زنجیره ۳ روزه 🔥', desc: '۳ روز تمرین مداوم' },
+                    'streak_7': { title: 'زنجیره هفتگی ⚡', desc: '۷ روز تمرین بدون وقفه' }
+                };
+                const info = map[a.achievement_id] || { title: a.achievement_id, desc: 'دستاورد کسب شده' };
+                return {
+                    ...a,
+                    title: info.title,
+                    description: info.desc,
+                    earned_date: a.earned_at ? new Date(a.earned_at).toLocaleDateString('fa-IR') : ''
+                };
+            });
+
+            // ۴. تسک‌ها و ماموریت‌های روزانه (user_daily_xp_log)
+            var dailyMissions = [];
+            var dailyLog = null;
+            try {
+                const { data: logs } = await supabase
+                    .from('user_daily_xp_log')
+                    .select('*')
+                    .eq('user_id', userId)
+                    .order('activity_date', { ascending: false })
+                    .limit(1);
+
+                if (logs && logs.length > 0) {
+                    dailyLog = logs[0];
+                    if (dailyLog.missions && Array.isArray(dailyLog.missions.missions)) {
+                        const progMap = dailyLog.missions.progress || {};
+                        dailyMissions = dailyLog.missions.missions.map(m => {
+                            const p = progMap[m.id] || {};
+                            return {
+                                id: m.id,
+                                title: m.titleFa || m.title || 'ماموریت روزانه',
+                                description: m.descriptionFa || m.description || '',
+                                emoji: m.emoji || '🎯',
+                                difficulty: m.difficulty || 'medium',
+                                xpReward: m.xpReward || 10,
+                                requirement: m.requirement || 1,
+                                currentProgress: p.currentProgress || 0,
+                                completed: p.completed || false
+                            };
+                        });
+                    }
+                }
+            } catch (e) {
+                console.warn('خطا در خواندن ماموریت‌های روزانه:', e.message);
             }
+
+            // ۵. اطلاعات سیستم Auth
+            try {
+                const { data: authData } = await supabase.auth.admin.getUserById(userId);
+                authUser = authData?.user || null;
+            } catch (e) {}
         }
 
         const cachedUser = siteUsers.getById.get(String(userId));
-        const user = profile || cachedUser;
+        const userObj = {
+            ...(cachedUser || {}),
+            ...(profile || {}),
+            email: authUser?.email || profile?.email || cachedUser?.email || 'بدون ایمیل',
+            last_sign_in_at: authUser?.last_sign_in_at || profile?.last_study_date || cachedUser?.last_activity,
+        };
+
+        const totalXp = Math.max(profile?.xp || 0, dailyLog?.total_xp || 0);
 
         return {
             success: true,
             userId,
-            user: user || null,
-            progress: user?.progress || user?.data || {},
+            user: userObj,
+            progress: {
+                xp: totalXp,
+                vocabXp: dailyLog?.vocab_xp || 0,
+                quizXp: dailyLog?.quiz_xp || 0,
+                streakDays: profile?.streak_days || profile?.streak_count || 0,
+                proficiencyLevel: profile?.proficiency_level || 'beginner',
+                songsCompleted: profile?.songs_completed || 0,
+                quizzesPassed: profile?.quizzes_passed || 0,
+                wordsLearned: profile?.words_learned || profile?.words_count_total || 0,
+                leitnerDue: profile?.leitner_due_count || 0,
+                leitnerMastered: profile?.leitner_mastered_count || 0,
+                leitnerTotal: profile?.leitner_total_count || leitnerCards.length || 0,
+                musicalInterests: profile?.musical_interests || [],
+                lastStudyDate: profile?.last_study_date || profile?.last_practice_date || null
+            },
+            dailyMissions: dailyMissions || [],
+            dailyLog: dailyLog || null,
+            leitnerCards,
+            achievements,
+            notes: cachedUser?.notes || '',
+            tags: JSON.parse(cachedUser?.tags || '[]')
         };
     } catch (error) {
         return { success: false, error: error.message };
