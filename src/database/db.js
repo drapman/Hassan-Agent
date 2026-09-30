@@ -93,9 +93,13 @@ function initializeDatabase() {
             total_price TEXT,
             order_date DATETIME,
             expected_delivery DATETIME,
+            tracking_code TEXT,
+            details TEXT,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
     `);
+    try { db.exec('ALTER TABLE orders ADD COLUMN tracking_code TEXT;'); } catch (e) {}
+    try { db.exec('ALTER TABLE orders ADD COLUMN details TEXT;'); } catch (e) {}
 
     // جدول مخاطبان پی‌وی تلگرام
     db.exec(`
