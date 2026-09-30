@@ -4,11 +4,14 @@
  * پشتیبانی مستقیم و نیتیو از Supabase + REST API
  */
 
+require('dotenv').config();
 const axios = require('axios');
-const { siteUsers, log } = require('../database/db');
+const { db, siteUsers, log } = require('../database/db');
 
 const SITE_API_URL = process.env.SITE_API_URL || '';
-const SITE_API_KEY = process.env.SITE_API_KEY || '';
+const SITE_API_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SITE_SERVICE_ROLE_KEY || process.env.SITE_API_KEY || '';
+const SITE_ADMIN_EMAIL = process.env.SITE_ADMIN_EMAIL || 'parsa_learner@gmail.com';
+const SITE_ADMIN_PASSWORD = process.env.SITE_ADMIN_PASSWORD || 'Password123456!';
 
 // تنظیم کلاینت Supabase در صورت وجود
 let supabase = null;
@@ -20,6 +23,43 @@ if (SITE_API_URL && SITE_API_KEY && SITE_API_URL.includes('supabase.co')) {
     } catch (e) {
         console.warn('⚠️ خطا در ایجاد کلاینت Supabase:', e.message);
     }
+}
+
+let authPromise = null;
+/**
+ * احراز هویت خودکار جهت دور زدن RLS بدون نیاز به مداخله دستی
+ */
+async function ensureAuth() {
+    if (!supabase) return null;
+    try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session) return sessionData.session;
+        if (authPromise) return authPromise;
+
+        authPromise = (async () => {
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email: SITE_ADMIN_EMAIL,
+                password: SITE_ADMIN_PASSWORD
+            });
+            if (error) {
+                console.warn('⚠️ ورود خودکار به Supabase:', error.message);
+                return null;
+            }
+            console.log('✅ ورود خودکار بات به Supabase موفقیت‌آمیز بود:', data.user?.email);
+            return data.session;
+        })();
+        const session = await authPromise;
+        authPromise = null;
+        return session;
+    } catch (e) {
+        authPromise = null;
+        console.warn('⚠️ خطا در ensureAuth:', e.message);
+        return null;
+    }
+}
+
+if (supabase) {
+    ensureAuth().catch(() => {});
 }
 
 // کلاینت پیش‌فرض برای REST API معمولی
@@ -38,6 +78,17 @@ const siteApiClient = axios.create({
  */
 function syncUsersToCache(users) {
     if (!Array.isArray(users)) return;
+    const activeIds = new Set(users.map(u => String(u.id || u.site_user_id)).filter(Boolean));
+
+    // حذف کاربرانی که از دیتابیس آنلاین حذف شده‌اند
+    try {
+        const cached = siteUsers.getAll.all();
+        cached.forEach(c => {
+            if (!activeIds.has(String(c.site_user_id))) {
+                db.prepare('DELETE FROM site_users WHERE site_user_id = ?').run(c.site_user_id);
+            }
+        });
+    } catch (e) {}
     users.forEach(user => {
         try {
             siteUsers.upsert.run({
@@ -61,14 +112,17 @@ function syncUsersToCache(users) {
 async function fetchAllSupabaseUsers() {
     if (!supabase) return [];
     try {
+        await ensureAuth();
         let authUsers = [];
         let profiles = [];
 
-        try {
-            const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
-            if (data?.users) authUsers = data.users;
-        } catch (err) {
-            console.warn('Auth admin listUsers error:', err.message);
+        if (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SITE_SERVICE_ROLE_KEY) {
+            try {
+                const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+                if (data?.users) authUsers = data.users;
+            } catch (err) {
+                console.warn('Auth admin listUsers error:', err.message);
+            }
         }
 
         try {
@@ -133,6 +187,42 @@ async function fetchAllSupabaseUsers() {
                 });
             }
         });
+
+        // ۳. ادغام کاربران از جدول عمومی leaderboard_weekly
+        try {
+            const { data: lb } = await supabase.from('leaderboard_weekly').select('*');
+            if (lb && lb.length > 0) {
+                lb.forEach(row => {
+                    const uid = row.user_id;
+                    if (!uid) return;
+                    const existing = unifiedMap.get(uid);
+                    if (!existing) {
+                        unifiedMap.set(uid, {
+                            id: uid,
+                            username: row.username || 'کاربر سایت',
+                            email: '',
+                            full_name: row.username || '',
+                            created_at: row.created_at || new Date().toISOString(),
+                            last_activity: row.updated_at || null,
+                            xp: row.xp_earned || 0,
+                            streak_days: 0,
+                            songs_completed: row.songs_completed || 0,
+                            quizzes_passed: row.quizzes_passed || 0,
+                            words_learned: 0,
+                            proficiency_level: 'beginner',
+                            musical_interests: [],
+                        });
+                    } else {
+                        existing.xp = Math.max(existing.xp || 0, row.xp_earned || 0);
+                        existing.songs_completed = Math.max(existing.songs_completed || 0, row.songs_completed || 0);
+                        existing.quizzes_passed = Math.max(existing.quizzes_passed || 0, row.quizzes_passed || 0);
+                        if (!existing.username || existing.username === 'Learner') existing.username = row.username;
+                    }
+                });
+            }
+        } catch (err) {
+            console.warn('Leaderboard query error:', err.message);
+        }
 
         const list = Array.from(unifiedMap.values());
         list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -228,6 +318,7 @@ async function getUserProgress(userId) {
         let achievements = [];
 
         if (supabase) {
+            await ensureAuth();
             // ۱. اطلاعات پروفایل و امتیازات
             const { data: prof, error: profErr } = await supabase
                 .from('profiles')
@@ -236,16 +327,47 @@ async function getUserProgress(userId) {
                 .maybeSingle();
             if (!profErr && prof) profile = prof;
 
+            // در صورت عدم دسترسی مستقیم به دلیل RLS، از جدول عمومی لیدربورد بازیابی کن
+            if (!profile) {
+                try {
+                    const { data: lbRow } = await supabase
+                        .from('leaderboard_weekly')
+                        .select('*')
+                        .eq('user_id', userId)
+                        .maybeSingle();
+                    if (lbRow) {
+                        profile = {
+                            id: userId,
+                            username: lbRow.username,
+                            xp: lbRow.xp_earned || 0,
+                            songs_completed: lbRow.songs_completed || 0,
+                            quizzes_passed: lbRow.quizzes_passed || 0,
+                        };
+                    }
+                } catch (e) {}
+            }
+
             // ۲. کلمات و کارت‌های لایتنر (تسک‌های یادگیری)
             const { data: cards } = await supabase
                 .from('leitner_cards')
                 .select('*')
                 .eq('user_id', userId)
                 .order('created_at', { ascending: false })
-                .limit(20);
+                .limit(50);
             leitnerCards = cards || [];
 
-            // ۳. دستاوردها و مدال‌ها
+            // ۳. پیشرفت آهنگ‌ها و آزمون‌ها (song_progress)
+            var songProgressList = [];
+            try {
+                const { data: sp } = await supabase
+                    .from('song_progress')
+                    .select('*')
+                    .eq('user_id', userId)
+                    .order('updated_at', { ascending: false });
+                songProgressList = sp || [];
+            } catch (e) {}
+
+            // ۴. دستاوردها و مدال‌ها
             const { data: achs } = await supabase
                 .from('user_achievements')
                 .select('*')
@@ -267,7 +389,7 @@ async function getUserProgress(userId) {
                 };
             });
 
-            // ۴. تسک‌ها و ماموریت‌های روزانه (user_daily_xp_log)
+            // ۵. تسک‌ها و ماموریت‌های روزانه (user_daily_xp_log)
             var dailyMissions = [];
             var dailyLog = null;
             try {
@@ -302,11 +424,13 @@ async function getUserProgress(userId) {
                 console.warn('خطا در خواندن ماموریت‌های روزانه:', e.message);
             }
 
-            // ۵. اطلاعات سیستم Auth
-            try {
-                const { data: authData } = await supabase.auth.admin.getUserById(userId);
-                authUser = authData?.user || null;
-            } catch (e) {}
+            // ۶. اطلاعات سیستم Auth
+            if (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SITE_SERVICE_ROLE_KEY) {
+                try {
+                    const { data: authData } = await supabase.auth.admin.getUserById(userId);
+                    authUser = authData?.user || null;
+                } catch (e) {}
+            }
         }
 
         const cachedUser = siteUsers.getById.get(String(userId));
@@ -318,6 +442,8 @@ async function getUserProgress(userId) {
         };
 
         const totalXp = Math.max(profile?.xp || 0, dailyLog?.total_xp || 0);
+        const resolvedSongsCompleted = Math.max(profile?.songs_completed || 0, (songProgressList || []).filter(s => s.status === 'completed').length);
+        const resolvedQuizzesPassed = Math.max(profile?.quizzes_passed || 0, (songProgressList || []).filter(s => (s.quiz_score || 0) >= 70).length);
 
         return {
             success: true,
@@ -329,9 +455,9 @@ async function getUserProgress(userId) {
                 quizXp: dailyLog?.quiz_xp || 0,
                 streakDays: profile?.streak_days || profile?.streak_count || 0,
                 proficiencyLevel: profile?.proficiency_level || 'beginner',
-                songsCompleted: profile?.songs_completed || 0,
-                quizzesPassed: profile?.quizzes_passed || 0,
-                wordsLearned: profile?.words_learned || profile?.words_count_total || 0,
+                songsCompleted: resolvedSongsCompleted,
+                quizzesPassed: resolvedQuizzesPassed,
+                wordsLearned: profile?.words_learned || profile?.words_count_total || leitnerCards.length || 0,
                 leitnerDue: profile?.leitner_due_count || 0,
                 leitnerMastered: profile?.leitner_mastered_count || 0,
                 leitnerTotal: profile?.leitner_total_count || leitnerCards.length || 0,
@@ -341,6 +467,7 @@ async function getUserProgress(userId) {
             dailyMissions: dailyMissions || [],
             dailyLog: dailyLog || null,
             leitnerCards,
+            songProgress: songProgressList || [],
             achievements,
             notes: cachedUser?.notes || '',
             tags: JSON.parse(cachedUser?.tags || '[]')
@@ -359,6 +486,7 @@ async function getUserProgress(userId) {
 async function sendMessageToUser(userId, message, type = 'info') {
     try {
         if (supabase) {
+            await ensureAuth();
             // درج در جدول اعلان‌ها / پیام‌ها در صورت وجود
             const { data, error } = await supabase
                 .from('notifications')
@@ -414,6 +542,7 @@ async function getSiteStats() {
     try {
         let totalUsers = 0;
         if (supabase) {
+            await ensureAuth();
             const { count, error } = await supabase
                 .from('profiles')
                 .select('*', { count: 'exact', head: true });

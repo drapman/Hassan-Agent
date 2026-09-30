@@ -2,6 +2,27 @@
  * Hassan Agent - Telegram Mini App Logic
  * مدیریت تعاملات، فچ زنده دیتابیس، تب‌ها و ادغام با Telegram WebApp
  */
+// Intercept all fetch requests to automatically bypass ngrok warning page and avoid caching
+const _origFetch = window.fetch;
+window.fetch = function(url, options) {
+    options = options || {};
+    let finalUrl = url;
+    if (typeof url === 'string') {
+        const sep = url.includes('?') ? '&' : '?';
+        finalUrl = `${url}${sep}_t=${Date.now()}`;
+    }
+    options.headers = options.headers || {};
+    if (options.headers instanceof Headers) {
+        options.headers.set('ngrok-skip-browser-warning', 'true');
+        options.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        options.headers.set('Pragma', 'no-cache');
+    } else {
+        options.headers['ngrok-skip-browser-warning'] = 'true';
+        options.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+        options.headers['Pragma'] = 'no-cache';
+    }
+    return _origFetch(finalUrl, options);
+};
 
 const tg = window.Telegram?.WebApp;
 
@@ -106,6 +127,8 @@ async function fetchStats() {
             document.getElementById('statTotalUsers').textContent = data.stats.totalUsers.toLocaleString('fa-IR');
             document.getElementById('statDbStatus').textContent = data.stats.databaseStatus;
             document.getElementById('statUptime').textContent = formatUptime(data.stats.uptime);
+            const sourceBadge = document.getElementById('sourceBadge');
+            if (sourceBadge) sourceBadge.textContent = 'Supabase Auth';
         }
     } catch (err) {
         console.warn('Error fetching stats:', err);
@@ -403,6 +426,42 @@ window.openUserModal = async function(userId) {
                     `).join('');
                 } else {
                     achWrapper.style.display = 'none';
+                }
+            }
+
+            // ۴. آهنگ‌ها و آزمون‌ها (Song Progress)
+            const songsBadge = document.getElementById('modalSongsBadge');
+            const songsListEl = document.getElementById('modalSongsList');
+            const songProg = data.songProgress || [];
+            if (songsBadge) songsBadge.textContent = `${songProg.length.toLocaleString('fa-IR')} آهنگ`;
+            if (songsListEl) {
+                if (songProg.length === 0) {
+                    songsListEl.innerHTML = `
+                        <div class="empty-tasks-placeholder">
+                            <p>📭 هنوز آهنگی برای این کاربر ثبت نشده است.</p>
+                        </div>
+                    `;
+                } else {
+                    songsListEl.innerHTML = songProg.map(s => {
+                        const score = s.quiz_score !== null && s.quiz_score !== undefined ? s.quiz_score : '---';
+                        const songName = s.song_id ? s.song_id.replace(/_/g, ' ').toUpperCase() : 'آهنگ ناشناخته';
+                        const date = s.completed_at ? new Date(s.completed_at).toLocaleDateString('fa-IR') : 'اخیراً';
+                        return `
+                            <div class="mission-card completed" style="margin-bottom:8px;">
+                                <div class="mission-top-row">
+                                    <div class="mission-title-box">
+                                        <span class="mission-emoji">🎵</span>
+                                        <span class="mission-name">${songName}</span>
+                                    </div>
+                                    <span class="card-box-badge">نمره کوییز: ${score}% 🎯</span>
+                                </div>
+                                <div class="card-meta-row" style="margin-top:6px;">
+                                    <span>وضعیت: ✅ تکمیل شده</span>
+                                    <span>📅 تاریخ: ${date}</span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
                 }
             }
 

@@ -169,17 +169,28 @@ bot.hears('📊 کاربران جدید', async (ctx) => {
         await ctx.sendChatAction('typing');
         const res = await getNewUsers(5, 7);
         if (res.success && res.users && res.users.length > 0) {
-            let msg = `👥 *کاربران جدید اخیر سایت (${res.users.length} نفر):*\n\n`;
+            let msg = `👥 <b>کاربران جدید اخیر سایت (${res.users.length} نفر):</b>\n\n`;
             res.users.slice(0, 5).forEach((u, idx) => {
-                const name = u.full_name || u.username || u.name || 'بدون نام';
-                const email = u.email || 'بدون ایمیل';
-                msg += `${idx + 1}. *${name}*\n📧 \`${email}\`\n\n`;
+                const rawName = u.full_name || u.username || u.name || 'بدون نام';
+                const name = String(rawName).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const email = String(u.email || 'بدون ایمیل').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const xp = u.xp || 0;
+                const songs = u.songs_completed || 0;
+                msg += `${idx + 1}. <b>${name}</b>\n📧 <code>${email}</code>\n⚡ امتیاز: ${xp} XP | 🎵 آهنگ‌ها: ${songs}\n\n`;
             });
-            await ctx.replyWithMarkdown(msg);
+            const webAppUrl = process.env.WEBAPP_URL;
+            if (webAppUrl && webAppUrl.startsWith('https://')) {
+                await ctx.replyWithHTML(msg, Markup.inlineKeyboard([
+                    [Markup.button.webApp('📱 مشاهده جزئیات در داشبورد', webAppUrl)]
+                ]));
+            } else {
+                await ctx.replyWithHTML(msg);
+            }
         } else {
             await ctx.reply('ℹ️ کاربر جدیدی در ۷ روز گذشته یافت نشد یا دیتابیس در دسترس نیست.');
         }
     } catch (err) {
+        console.error('Error in new users command:', err);
         await ctx.reply(`❌ خطا در دریافت کاربران: ${err.message}`);
     }
 });

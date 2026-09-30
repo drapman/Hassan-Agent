@@ -6,11 +6,15 @@
     <title>Hassan Agent | داشبورد مدیریت</title>
     <!-- Telegram WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Anti-cache headers for Telegram WebApp -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <!-- Google Fonts: Vazirmatn -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=3.0">
 </head>
 <body>
     <div class="app-container">
@@ -46,7 +50,7 @@
                 <div class="stat-icon">⚡</div>
                 <div class="stat-info">
                     <span class="stat-label">وضعیت دیتابیس</span>
-                    <span class="stat-value small-text" id="statDbStatus">Supabase</span>
+                    <span class="stat-value small-text" id="statDbStatus">Supabase Cloud</span>
                 </div>
             </div>
             <div class="stat-card stat-time">
@@ -118,7 +122,7 @@
             <section class="tab-pane" id="tab-system">
                 <div class="system-card">
                     <h3>🤖 هویت Agent</h3>
-                    <p class="system-desc">دستیار هوشمند شخصی با اتصال مستقیم به دیتابیس Supabase و مدل زبانی Google Gemini Flash</p>
+                    <p class="system-desc">دستیار هوشمند شخصی با اتصال مستقیم به دیتابیس ابری ۲۴ ساعته Supabase و مدل زبانی Google Gemini Flash</p>
                     <div class="system-meta-row">
                         <span>سرویس هوش مصنوعی:</span>
                         <span class="meta-tag active-tag">Google Gemini Flash-Lite</span>
@@ -246,6 +250,19 @@
 
                     <hr class="modal-divider">
 
+                    <!-- Completed Songs & Quizzes Section -->
+                    <div class="tasks-section-header">
+                        <h4 class="sub-title">🎵 آهنگ‌ها و آزمون‌های گذرانده‌شده</h4>
+                        <span class="section-badge" id="modalSongsBadge">۰ آهنگ</span>
+                    </div>
+                    <div class="songs-progress-list" id="modalSongsList">
+                        <div class="loading-state-small">
+                            <p>در حال دریافت گزارش آهنگ‌ها...</p>
+                        </div>
+                    </div>
+
+                    <hr class="modal-divider">
+
                     <!-- Send Message Section -->
                     <h4 class="sub-title">📩 ارسال پیام مستقیم به کاربر</h4>
                     <div class="input-group">
@@ -276,6 +293,6 @@
         <div class="toast-container" id="toastContainer"></div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=3.0"></script>
 </body>
 </html>

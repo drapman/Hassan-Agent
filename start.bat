@@ -23,6 +23,16 @@ if not exist "node_modules" (
     call npm install
 )
 
+:: راه‌اندازی خودکار تونل ngrok برای مینی‌اپ تلگرام
+tasklist /fi "imagename eq ngrok.exe" | findstr /i "ngrok.exe" >nul
+if errorlevel 1 (
+    echo [INFO] در حال راه‌اندازی تونل ngrok برای مینی‌اپ تلگرام...
+    start "Ngrok Tunnel (Telegram Mini App)" /min ngrok http 3000 --url=gorgeous-germicide-backfire.ngrok-free.dev
+    timeout /t 3 >nul
+) else (
+    echo [OK] تونل ngrok از قبل در حال اجراست.
+)
+
 :loop
 echo.
 echo [INFO] در حال راه‌اندازی Agent...
