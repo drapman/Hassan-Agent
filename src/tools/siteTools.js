@@ -42,7 +42,7 @@ function syncUsersToCache(users) {
         try {
             siteUsers.upsert.run({
                 site_user_id: String(user.id || user._id || user.user_id),
-                username: user.username || user.name || user.email || '',
+                username: user.username || user.name || user.email?.split('@')[0] || '',
                 email: user.email || '',
                 full_name: user.full_name || user.name || user.display_name || '',
                 registration_date: user.created_at || user.registration_date || new Date().toISOString(),
@@ -56,6 +56,95 @@ function syncUsersToCache(users) {
 }
 
 /**
+ * دریافت یکپارچه و ۱۰۰٪ هماهنگ تمام کاربران از Supabase
+ */
+async function fetchAllSupabaseUsers() {
+    if (!supabase) return [];
+    try {
+        let authUsers = [];
+        let profiles = [];
+
+        try {
+            const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+            if (data?.users) authUsers = data.users;
+        } catch (err) {
+            console.warn('Auth admin listUsers error:', err.message);
+        }
+
+        try {
+            const { data } = await supabase.from('profiles').select('*');
+            if (data) profiles = data;
+        } catch (err) {
+            console.warn('Profiles query error:', err.message);
+        }
+
+        const unifiedMap = new Map();
+
+        // ۱. پردازش جدول profiles
+        profiles.forEach(p => {
+            unifiedMap.set(p.id, {
+                id: p.id,
+                username: p.username || '',
+                email: p.email || '',
+                full_name: [p.first_name, p.last_name].filter(Boolean).join(' ') || p.username || '',
+                created_at: p.created_at || new Date().toISOString(),
+                last_activity: p.last_study_date || p.last_practice_date || p.updated_at || null,
+                xp: p.xp || 0,
+                streak_days: p.streak_days || 0,
+                songs_completed: p.songs_completed || 0,
+                quizzes_passed: p.quizzes_passed || 0,
+                words_learned: p.words_learned || 0,
+                proficiency_level: p.proficiency_level || 'beginner',
+                musical_interests: p.musical_interests || [],
+                profile: p,
+            });
+        });
+
+        // ۲. ادغام کامل با auth.users بر اساس User ID
+        authUsers.forEach(u => {
+            const existing = unifiedMap.get(u.id);
+            const userMeta = u.user_metadata || {};
+            const resolvedUsername = existing?.username || userMeta.username || userMeta.name || u.email?.split('@')[0] || '';
+            const resolvedEmail = u.email || existing?.email || '';
+            const resolvedFullName = existing?.full_name || userMeta.full_name || userMeta.name || '';
+
+            if (existing) {
+                if (!existing.email) existing.email = resolvedEmail;
+                if (!existing.username) existing.username = resolvedUsername;
+                if (!existing.full_name) existing.full_name = resolvedFullName;
+                existing.last_activity = existing.last_activity || u.last_sign_in_at;
+                existing.metadata = userMeta;
+            } else {
+                unifiedMap.set(u.id, {
+                    id: u.id,
+                    username: resolvedUsername,
+                    email: resolvedEmail,
+                    full_name: resolvedFullName,
+                    created_at: u.created_at || new Date().toISOString(),
+                    last_activity: u.last_sign_in_at,
+                    metadata: userMeta,
+                    xp: 0,
+                    streak_days: 0,
+                    songs_completed: 0,
+                    quizzes_passed: 0,
+                    words_learned: 0,
+                    proficiency_level: 'beginner',
+                    musical_interests: [],
+                });
+            }
+        });
+
+        const list = Array.from(unifiedMap.values());
+        list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        syncUsersToCache(list);
+        return list;
+    } catch (e) {
+        console.warn('fetchAllSupabaseUsers error:', e.message);
+        return [];
+    }
+}
+
+/**
  * دریافت لیست کاربران جدید سایت
  * @param {number} limit - تعداد کاربران
  * @param {number} days - محدوده زمانی (روز)
@@ -65,51 +154,8 @@ async function getNewUsers(limit = 10, days = 7) {
         let users = [];
         
         if (supabase) {
-            // ۱. دریافت کاربران از سیستم احراز هویت Supabase Auth
-            try {
-                const { data: authData, error: authErr } = await supabase.auth.admin.listUsers();
-                if (!authErr && authData?.users?.length > 0) {
-                    users = authData.users.map(u => ({
-                        id: u.id,
-                        email: u.email,
-                        username: u.user_metadata?.username || u.user_metadata?.name || u.email?.split('@')[0] || '',
-                        full_name: u.user_metadata?.full_name || u.user_metadata?.name || '',
-                        created_at: u.created_at,
-                        last_activity: u.last_sign_in_at,
-                        metadata: u.user_metadata,
-                    }));
-                }
-            } catch (e) {
-                console.warn('Auth admin listUsers error:', e.message);
-            }
-
-            // ۲. دریافت از جدول profiles در دیتابیس Supabase
-            try {
-                let query = supabase.from('profiles').select('*').limit(limit);
-                try {
-                    query = query.order('created_at', { ascending: false });
-                } catch (e) {}
-
-                const { data: profilesData, error: profError } = await query;
-                if (!profError && profilesData && profilesData.length > 0) {
-                    if (users.length === 0) {
-                        users = profilesData;
-                    } else {
-                        // ادغام دیتابیس با سیستم Auth
-                        // توجه: داده‌های Auth (مانند email) باید اولویت داشته باشن
-                        users = users.map(u => {
-                            const prof = profilesData.find(p => p.id === u.id || p.email === u.email);
-                            return prof ? { ...prof, ...u } : u;
-                        });
-                    }
-                }
-            } catch (e) {
-                console.warn('Profiles query error:', e.message);
-            }
-
-            if (users.length > 0) {
-                syncUsersToCache(users);
-            }
+            const allUsers = await fetchAllSupabaseUsers();
+            users = allUsers.slice(0, limit);
         } else if (SITE_API_URL && SITE_API_KEY) {
             const response = await siteApiClient.get('/users', {
                 params: {
@@ -139,44 +185,19 @@ async function getNewUsers(limit = 10, days = 7) {
  */
 async function searchUser(query) {
     try {
+        const q = String(query).toLowerCase().trim();
+
         if (supabase) {
-            // جستجو در کاربران ثبت‌نامی Supabase Auth
-            try {
-                const { data: authData } = await supabase.auth.admin.listUsers();
-                if (authData?.users?.length > 0) {
-                    const q = query.toLowerCase();
-                    const matched = authData.users.filter(u => 
-                        (u.email && u.email.toLowerCase().includes(q)) ||
-                        (u.id && u.id.toLowerCase().includes(q)) ||
-                        (u.user_metadata?.name && String(u.user_metadata.name).toLowerCase().includes(q)) ||
-                        (u.user_metadata?.username && String(u.user_metadata.username).toLowerCase().includes(q)) ||
-                        (u.user_metadata?.full_name && String(u.user_metadata.full_name).toLowerCase().includes(q))
-                    );
-                    if (matched.length > 0) {
-                        const formatted = matched.map(u => ({
-                            id: u.id,
-                            email: u.email,
-                            username: u.user_metadata?.username || u.user_metadata?.name || u.email?.split('@')[0],
-                            full_name: u.user_metadata?.full_name || u.user_metadata?.name || '',
-                            created_at: u.created_at,
-                            last_activity: u.last_sign_in_at,
-                        }));
-                        syncUsersToCache(formatted);
-                        return { success: true, users: formatted, source: 'supabase_auth' };
-                    }
-                }
-            } catch (e) {}
+            const allUsers = await fetchAllSupabaseUsers();
+            const matched = allUsers.filter(u => 
+                (u.email && u.email.toLowerCase().includes(q)) ||
+                (u.id && u.id.toLowerCase().includes(q)) ||
+                (u.username && u.username.toLowerCase().includes(q)) ||
+                (u.full_name && u.full_name.toLowerCase().includes(q))
+            );
 
-            // جستجو در جدول profiles
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('*')
-                .or(`username.ilike.%${query}%,email.ilike.%${query}%,full_name.ilike.%${query}%`)
-                .limit(10);
-
-            if (!error && data && data.length > 0) {
-                syncUsersToCache(data);
-                return { success: true, users: data, source: 'supabase_profiles' };
+            if (matched.length > 0) {
+                return { success: true, users: matched, source: 'supabase_unified' };
             }
         }
 
