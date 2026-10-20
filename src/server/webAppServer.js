@@ -104,6 +104,14 @@ function requireAdminAuth(req, res, next) {
         }
     }
 
+    // ۳. اگر هیچ مدرک احراز هویتی ارسال نشده، فقط درخواست‌های خواندنی (GET) مجازند.
+    //    این حالت برای کلاینت‌هایی است که SDK تلگرام برایشان لود نمی‌شود و initData ندارند؛
+    //    ارسال پیام و ثبت یادداشت همچنان فقط با احراز هویت ادمین انجام می‌شود.
+    const noCredentials = !initData && !bearer && !customAdminHeader;
+    if (noCredentials && req.method === 'GET') {
+        return next();
+    }
+
     return res.status(401).json({
         success: false,
         error: 'دسترسی غیرمجاز: احراز هویت مدیر الزامی است.'

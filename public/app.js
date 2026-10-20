@@ -13,6 +13,23 @@ function escapeHTML(str) {
         .replace(/'/g, '&#39;');
 }
 
+// گرفتن initData تلگرام؛ اگر SDK لود نشده باشد از هش/کوئری آدرس هم تلاش می‌کند
+function getInitData() {
+    const fromSdk = window.Telegram?.WebApp?.initData || '';
+    if (fromSdk) return fromSdk;
+
+    try {
+        const hash = window.location.hash ? window.location.hash.replace(/^#/, '') : '';
+        const fromHash = new URLSearchParams(hash).get('tgWebAppData');
+        if (fromHash) return fromHash;
+
+        const fromQuery = new URLSearchParams(window.location.search).get('initData');
+        if (fromQuery) return fromQuery;
+    } catch (e) {}
+
+    return '';
+}
+
 // رهگیری تمام درخواست‌های fetch جهت ضمیمه کردن احراز هویت، جلوگیری از کش و دور زدن صفحه ngrok
 const _origFetch = window.fetch;
 window.fetch = function(url, options) {
@@ -24,7 +41,7 @@ window.fetch = function(url, options) {
     }
     options.headers = options.headers || {};
 
-    const initData = window.Telegram?.WebApp?.initData || '';
+    const initData = getInitData();
     const adminToken = localStorage.getItem('hassan_admin_token') || new URLSearchParams(window.location.search).get('token') || '';
 
     const setHeader = (k, v) => {
