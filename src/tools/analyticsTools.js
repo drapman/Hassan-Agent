@@ -176,7 +176,17 @@ async function getOverview(days = 7) {
         if (error) {
             return { success: false, error: error.message };
         }
-        return { success: true, days: safeDays, overview: data };
+
+        // آمار یادآور روزانه (اختیاری: اگر تابع نبود، گزارش اصلی نباید بشکند)
+        let reminders = null;
+        try {
+            const res = await supabase.rpc('reminder_stats');
+            if (!res.error) reminders = res.data;
+        } catch {
+            reminders = null;
+        }
+
+        return { success: true, days: safeDays, overview: { ...(data || {}), reminders } };
     } catch (err) {
         return { success: false, error: err.message };
     }
@@ -205,6 +215,7 @@ function formatOverview(overview, days = 7) {
     const referrers = Array.isArray(overview.referrers) ? overview.referrers : [];
     const devices = Array.isArray(overview.devices) ? overview.devices : [];
     const errors = Array.isArray(overview.errors) ? overview.errors : [];
+    const reminders = overview.reminders || {};
 
     const pageviews = Number(totals.pageviews) || 0;
     const visitors = Number(totals.visitors) || 0;
@@ -234,6 +245,15 @@ function formatOverview(overview, days = 7) {
         `🚨 <b>${faNum(totals.errors)}</b> خطا` +
         (Number(totals.errors) > 0 && Number(prev.errors) > 0 ? trendSuffix(totals.errors, prev.errors) : '')
     );
+    if (Number(reminders.subscribers) > 0) {
+        const notified = Number(reminders.notified_today) || 0;
+        lines.push(
+            `🔔 <b>${faNum(reminders.subscribers)}</b> نفر یادآور روزانه را روشن کرده‌اند` +
+            (notified > 0 ? ` · امروز ${faNum(notified)} یادآوری رفت` : ' · امروز هنوز یادآوری نرفته')
+        );
+    } else {
+        lines.push('🔔 هنوز کسی یادآور روزانه را روشن نکرده');
+    }
 
     // ── نمودار روزانه
     const recentDays = daily.slice(-7);
