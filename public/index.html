@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=3.0">
+    <link rel="stylesheet" href="style.css?v=4.0">
 </head>
 <body>
     <div class="app-container">
@@ -67,6 +67,18 @@
             <button class="tab-btn active" data-tab="tab-users">
                 <span>👥</span>
                 <span>کاربران سایت</span>
+            </button>
+            <button class="tab-btn" data-tab="tab-analytics">
+                <span>📊</span>
+                <span>آمار</span>
+            </button>
+            <button class="tab-btn" data-tab="tab-errors">
+                <span>🚨</span>
+                <span>خطاها</span>
+            </button>
+            <button class="tab-btn" data-tab="tab-leaderboard">
+                <span>🏆</span>
+                <span>لیدربورد</span>
             </button>
             <button class="tab-btn" data-tab="tab-currency">
                 <span>💰</span>
@@ -138,6 +150,60 @@
                     <div class="system-meta-row">
                         <span>سرور مینی‌اپ:</span>
                         <span class="meta-tag active-tag">Express API آنلاین</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 4: ANALYTICS -->
+            <section class="tab-pane" id="tab-analytics">
+                <div class="pane-toolbar">
+                    <div class="range-chips" id="analyticsRange">
+                        <button class="chip" data-days="1">امروز</button>
+                        <button class="chip active" data-days="7">۷ روز</button>
+                        <button class="chip" data-days="30">۳۰ روز</button>
+                        <button class="chip" data-days="90">۹۰ روز</button>
+                    </div>
+                    <span class="live-pill" id="analyticsLive" style="display:none;">
+                        <span class="live-dot"></span>
+                        <b id="analyticsLiveCount">۰</b> نفر آنلاین
+                    </span>
+                </div>
+                <div class="pane-body" id="analyticsBody">
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>در حال دریافت آمار...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 5: ERRORS -->
+            <section class="tab-pane" id="tab-errors">
+                <div class="pane-toolbar">
+                    <div class="range-chips" id="errorsRange">
+                        <button class="chip" data-days="1">امروز</button>
+                        <button class="chip active" data-days="7">۷ روز</button>
+                        <button class="chip" data-days="30">۳۰ روز</button>
+                    </div>
+                    <span class="section-badge" id="errorsTotalBadge">—</span>
+                </div>
+                <div class="pane-body" id="errorsBody">
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>در حال بررسی خطاها...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 6: LEADERBOARD -->
+            <section class="tab-pane" id="tab-leaderboard">
+                <div class="pane-toolbar">
+                    <span class="section-badge">⚡ رتبه‌بندی بر اساس XP</span>
+                    <span class="card-hint" id="leaderboardUpdatedAt"></span>
+                </div>
+                <div class="pane-body" id="leaderboardBody">
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>در حال دریافت لیدربورد...</p>
                     </div>
                 </div>
             </section>
@@ -293,6 +359,6 @@
         <div class="toast-container" id="toastContainer"></div>
     </div>
 
-    <script src="app.js?v=3.0"></script>
+    <script src="app.js?v=4.0"></script>
 </body>
 </html>

@@ -11,6 +11,7 @@ const { Telegraf, Markup } = require('telegraf');
 const { processMessage, clearSession } = require('../agent/masterAgent');
 const { initializeDatabase, memory, log } = require('../database/db');
 const { getOverview, formatOverview, formatErrors, toPlain } = require('../tools/analyticsTools');
+const { getLeaderboard, formatLeaderboard } = require('../tools/leaderboardTools');
 
 // ──────────────────────────────────────────────────
 // Validation
@@ -22,7 +23,7 @@ if (!process.env.TELEGRAM_BOT_TOKEN) {
 
 const OWNER_ID = parseInt(process.env.TELEGRAM_OWNER_ID || '0');
 if (!OWNER_ID) {
-    console.error('⚠️  TELEGRAM_OWNER_ID تنظیم نشده! بات برای همه باز خواهد بود.');
+    console.error('❌ خطا: TELEGRAM_OWNER_ID در .env تنظیم نشده است! برای امنیت، ربات در وضعیت مسدودسازی پیش‌فرض (Default Deny) کار خواهد کرد.');
 }
 
 // ──────────────────────────────────────────────────
@@ -39,12 +40,13 @@ const userQueues = new Map();
 bot.use(async (ctx, next) => {
     const senderId = ctx.from?.id;
     const senderName = ctx.from?.username || ctx.from?.first_name || 'کاربر';
-    const text = ctx.message?.text || ctx.updateType;
-    console.log(`📩 پیام جدید از [${senderName}] (آیدی: ${senderId}): "${text}"`);
+    const text = ctx.message?.text || '';
+    const preview = text ? (text.length > 30 ? `${text.slice(0, 30)}...` : text) : (ctx.updateType || 'update');
+    console.log(`📩 پیام جدید از [${senderName}] (آیدی: ${senderId}): "${preview}"`);
 
-    if (OWNER_ID && senderId !== OWNER_ID) {
-        console.warn(`⛔ دسترسی غیرمجاز! آیدی پیام‌دهنده (${senderId}) با مالک (${OWNER_ID}) متفاوت است.`);
-        await ctx.reply(`❌ شما دسترسی به این ربات ندارید.\nآیدی عددی تلگرام شما: ${senderId}\nلطفاً این آیدی را در TELEGRAM_OWNER_ID فایل .env قرار دهید.`);
+    if (!OWNER_ID || senderId !== OWNER_ID) {
+        console.warn(`⛔ [SECURITY] دسترسی غیرمجاز مسدود شد! آیدی فرستنده (${senderId}) با مالک مطابقت ندارد.`);
+        await ctx.reply(`❌ شما دسترسی به این ربات را ندارید.\nآیدی عددی تلگرام شما: ${senderId}\nبرای فعال‌سازی دسترسی، این شناسه را در متغیر TELEGRAM_OWNER_ID فایل .env تنظیم کنید.`);
         return;
     }
     return next();
@@ -101,6 +103,7 @@ bot.command('help', async (ctx) => {
 /help - این راهنما
 /stats - آمار بازدید، ثبت‌نام و خطاهای سایت
 /errors - خطاهای واقعی کاربران
+/leaderboard - جدول امتیازات کاربران
 /clear - پاک کردن تاریخچه مکالمه
 /status - وضعیت سیستم
 /memory - مشاهده حافظه ذخیره‌شده
@@ -275,7 +278,23 @@ const RANGE_BUTTONS = [
 ];
 
 function analyticsKeyboard() {
-    return Markup.inlineKeyboard([RANGE_BUTTONS]);
+    const rows = [RANGE_BUTTONS];
+    const url = webAppUrl('analytics');
+    if (url) rows.push([Markup.button.webApp('📈 نمودار کامل در داشبورد', url)]);
+    return Markup.inlineKeyboard(rows);
+}
+
+/** لینک مستقیم به تب مینی‌اپ (فقط وقتی WEBAPP_URL روی https است) */
+function webAppUrl(tab) {
+    const base = process.env.WEBAPP_URL;
+    if (!base || !base.startsWith('https://')) return null;
+    return `${base.replace(/\/$/, '')}/?tab=${encodeURIComponent(tab)}`;
+}
+
+function errorsKeyboard() {
+    const url = webAppUrl('errors');
+    if (!url) return {};
+    return Markup.inlineKeyboard([[Markup.button.webApp('🚨 جزئیات گرافیکی خطاها', url)]]);
 }
 
 async function sendAnalyticsReport(ctx, days = 7, { edit = false } = {}) {
@@ -322,7 +341,7 @@ async function sendErrorsReport(ctx, days = 7) {
         }
 
         const html = formatErrors(res.overview, days, 8);
-        await ctx.replyWithHTML(html, { disable_web_page_preview: true })
+        await ctx.replyWithHTML(html, { disable_web_page_preview: true, ...errorsKeyboard() })
             .catch(() => ctx.reply(toPlain(html)));
     } catch (err) {
         console.error('❌ خطا در ارسال گزارش خطاها:', err);
@@ -332,6 +351,35 @@ async function sendErrorsReport(ctx, days = 7) {
 
 bot.command(['stats', 'analytics', 'report'], (ctx) => sendAnalyticsReport(ctx, 7));
 bot.command(['errors', 'bugs'], (ctx) => sendErrorsReport(ctx, 7));
+
+// لیدربورد — جدول امتیازات سایت
+async function sendLeaderboard(ctx, limit = 10) {
+    try {
+        await ctx.sendChatAction('typing').catch(() => {});
+
+        const data = await getLeaderboard({ limit: 20 });
+        if (!data.success) {
+            return ctx.reply(`❌ لیدربورد در دسترس نیست.\n${data.error}`);
+        }
+
+        const html = formatLeaderboard(data, limit);
+        const extra = { parse_mode: 'HTML', disable_web_page_preview: true };
+        const url = webAppUrl('leaderboard');
+        if (url) {
+            extra.reply_markup = {
+                inline_keyboard: [[{ text: '🏆 جدول گرافیکی در داشبورد', web_app: { url } }]],
+            };
+        }
+
+        await ctx.replyWithHTML(html, extra).catch(() => ctx.reply(toPlain(html)));
+    } catch (err) {
+        console.error('❌ خطا در ارسال لیدربورد:', err);
+        await ctx.reply(`❌ خطا در دریافت لیدربورد: ${err.message}`);
+    }
+}
+
+bot.command(['leaderboard', 'top', 'rank'], (ctx) => sendLeaderboard(ctx, 10));
+bot.hears('🏆 لیدربورد', (ctx) => sendLeaderboard(ctx, 10));
 
 bot.hears('📊 آمار سایت', (ctx) => sendAnalyticsReport(ctx, 7));
 bot.hears('🚨 خطاها', (ctx) => sendErrorsReport(ctx, 7));
@@ -350,7 +398,7 @@ function getMainKeyboard() {
     } else {
         rows.push(['📱 داشبورد مدیریت']);
     }
-    rows.push(['📊 آمار سایت', '🚨 خطاها']);
+    rows.push(['📊 آمار سایت', '🚨 خطاها', '🏆 لیدربورد']);
     rows.push(['📊 کاربران جدید', '📧 ایمیل‌ها']);
     rows.push(['💱 نرخ ارز', '✈️ بلیط']);
     rows.push(['🔄 شروع مجدد', '❓ راهنما']);

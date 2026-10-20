@@ -89,6 +89,20 @@ function pageLabel(path) {
     return path;
 }
 
+/** عنوان خوانا برای آهنگ (وقتی props.title ثبت نشده و path خام است) */
+function songLabel(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return 'بدون نام';
+    if (raw.startsWith('/song/') || raw.startsWith('song/')) {
+        return raw
+            .replace(/^\/?song\//, '')
+            .replace(/\/+$/, '')
+            .replace(/[-_]+/g, ' ')
+            .trim();
+    }
+    return raw;
+}
+
 function rangeLabel(days) {
     const d = Number(days) || 7;
     if (d <= 1) return 'امروز';
@@ -290,7 +304,7 @@ function formatOverview(overview, days = 7) {
         lines.push('');
         lines.push('🎧 <b>پرطرفدارترین آهنگ‌ها</b>');
         songs.slice(0, 5).forEach((s, i) => {
-            lines.push(`${faNum(i + 1)}. ${esc(clip(s.title, 40))} — ${faNum(s.opens)} بار`);
+            lines.push(`${faNum(i + 1)}. ${esc(clip(songLabel(s.title), 40))} — ${faNum(s.opens)} بار`);
         });
     }
 
