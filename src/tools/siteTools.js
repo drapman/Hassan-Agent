@@ -10,8 +10,8 @@ const { db, siteUsers, log } = require('../database/db');
 
 const SITE_API_URL = process.env.SITE_API_URL || '';
 const SITE_API_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SITE_SERVICE_ROLE_KEY || process.env.SITE_API_KEY || '';
-const SITE_ADMIN_EMAIL = process.env.SITE_ADMIN_EMAIL || 'parsa_learner@gmail.com';
-const SITE_ADMIN_PASSWORD = process.env.SITE_ADMIN_PASSWORD || 'Password123456!';
+const SITE_ADMIN_EMAIL = process.env.SITE_ADMIN_EMAIL || '';
+const SITE_ADMIN_PASSWORD = process.env.SITE_ADMIN_PASSWORD || '';
 
 // تنظیم کلاینت Supabase در صورت وجود
 let supabase = null;
@@ -53,7 +53,7 @@ let authPromise = null;
  * احراز هویت خودکار جهت دور زدن RLS در صورت استفاده از کلید معمولی (Anon)
  */
 async function ensureAuth() {
-    if (!supabase || hasServiceRole) return null;
+    if (!supabase || hasServiceRole || !SITE_ADMIN_EMAIL || !SITE_ADMIN_PASSWORD) return null;
     try {
         const { data: sessionData } = await supabase.auth.getSession();
         if (sessionData?.session) return sessionData.session;
@@ -315,8 +315,9 @@ async function searchUser(query) {
         }
 
         // جستجو در کش محلی
+        const safeQuery = `%${String(query || '').replace(/[%_\\]/g, '\\$&')}%`;
         const localResults = siteUsers.search.all(
-            `%${query}%`, `%${query}%`, `%${query}%`
+            safeQuery, safeQuery, safeQuery
         );
 
         if (localResults.length > 0) {

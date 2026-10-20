@@ -197,7 +197,7 @@ const siteUserOps = {
 
     search: db.prepare(`
         SELECT * FROM site_users 
-        WHERE username LIKE ? OR email LIKE ? OR full_name LIKE ?
+        WHERE username LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\' OR full_name LIKE ? ESCAPE '\\'
         LIMIT 10
     `),
 
@@ -314,10 +314,11 @@ const contactOps = {
     },
 
     search: (query) => {
-        const q = `%${query.replace('@', '')}%`;
+        const cleanQuery = String(query || '').replace(/[%_\\]/g, '\\$&').replace('@', '').trim();
+        const q = `%${cleanQuery}%`;
         const stmt = db.prepare(`
             SELECT * FROM telegram_contacts 
-            WHERE username LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR telegram_id LIKE ?
+            WHERE username LIKE ? ESCAPE '\\' OR first_name LIKE ? ESCAPE '\\' OR last_name LIKE ? ESCAPE '\\' OR telegram_id LIKE ? ESCAPE '\\'
             ORDER BY last_seen DESC LIMIT 10
         `);
         return stmt.all(q, q, q, q);

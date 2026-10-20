@@ -8,6 +8,8 @@
  */
 
 const axios = require('axios');
+const dns = require('dns').promises;
+const net = require('net');
 const { log } = require('../database/db');
 
 // ─────────────────────────────────────────
@@ -48,15 +50,102 @@ async function searchWeb(query, maxResults = 3) {
 }
 
 /**
- * خواندن محتوای یک صفحه وب
+ * بررسی اینکه آیا آدرس IP خصوصی، لوپ‌بک یا متادیتای کلود است یا خیر
+ */
+function isPrivateOrReservedIP(ip) {
+    if (!ip) return true;
+    let normalized = ip;
+    if (normalized.startsWith('::ffff:')) {
+        normalized = normalized.substring(7);
+    }
+
+    if (net.isIPv4(normalized)) {
+        const parts = normalized.split('.').map(Number);
+        if (parts.length !== 4 || parts.some(isNaN)) return true;
+
+        if (parts[0] === 0) return true; // 0.0.0.0/8
+        if (parts[0] === 127) return true; // 127.0.0.0/8 Loopback
+        if (parts[0] === 10) return true; // 10.0.0.0/8 Private
+        if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true; // 172.16.0.0/12 Private
+        if (parts[0] === 192 && parts[1] === 168) return true; // 192.168.0.0/16 Private
+        if (parts[0] === 169 && parts[1] === 254) return true; // 169.254.0.0/16 Link-Local / Cloud Metadata
+        if (parts[0] >= 224) return true; // Multicast & Reserved
+        return false;
+    }
+
+    if (net.isIPv6(normalized)) {
+        const lower = normalized.toLowerCase();
+        if (lower === '::1' || lower === '::') return true; // Loopback / Unspecified
+        if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // ULA
+        if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true; // Link-local
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * اعتبارسنجی امن آدرس اینترنتی جهت پیشگیری از حملات SSRF
+ */
+async function validateSafeURL(rawUrl) {
+    let parsed;
+    try {
+        parsed = new URL(rawUrl);
+    } catch {
+        throw new Error('آدرس وب نامعتبر است.');
+    }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('پروتکل مجاز نیست (تنها http و https مجاز هستند).');
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+    if (!hostname || hostname === 'localhost' || hostname.endsWith('.local') || hostname.endsWith('.internal')) {
+        throw new Error('دسترسی به هاست‌های لوکال و داخلی مسدود است.');
+    }
+
+    // بررسی پورت‌های مشکوک یا داخلی
+    const port = parsed.port ? parseInt(parsed.port, 10) : (parsed.protocol === 'https:' ? 443 : 80);
+    const forbiddenPorts = [8090, 3000, 5173, 5432, 22, 25, 6379, 27017];
+    if (forbiddenPorts.includes(port)) {
+        throw new Error(`دسترسی به پورت داخلی ${port} مسدود است.`);
+    }
+
+    // تحلیل DNS برای کلیه رکوردهای آی‌پی
+    let addresses = [];
+    try {
+        addresses = await dns.lookup(hostname, { all: true });
+    } catch (e) {
+        throw new Error(`خطای بررسی DNS دامنه: ${e.message}`);
+    }
+
+    if (!addresses || addresses.length === 0) {
+        throw new Error('هیچ آدرس IP برای این دامنه یافت نشد.');
+    }
+
+    for (const record of addresses) {
+        if (isPrivateOrReservedIP(record.address)) {
+            throw new Error(`دسترسی به آدرس IP خصوصی (${record.address}) به دلایل امنیتی مسدود است.`);
+        }
+    }
+
+    return parsed;
+}
+
+/**
+ * خواندن محتوای یک صفحه وب با حفاظت کامل در برابر SSRF
  * @param {string} url - آدرس صفحه
  */
 async function readWebPage(url) {
     try {
+        await validateSafeURL(url);
+
         const response = await axios.get(url, {
-            timeout: 15000,
+            timeout: 10000,
+            maxRedirects: 0, // جلوگیری از ریدایرکت مخرب به شبکه‌های داخلی
+            maxContentLength: 2 * 1024 * 1024, // حداکثر ۲ مگابایت
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml',
                 'Accept-Language': 'fa,en;q=0.9',
             },
@@ -77,11 +166,12 @@ async function readWebPage(url) {
             .replace(/\s+/g, ' ')
             .replace(/\n+/g, '\n')
             .trim()
-            .substring(0, 1000); // کاهش سقف به 1000 کاراکتر برای صرفه‌جویی شدید در توکن
+            .substring(0, 1000);
 
         log.log.run('READ_WEBPAGE', `خواندن: ${url}`, `${cleanText.length} کاراکتر`, 1);
         return { success: true, url, title, content: cleanText };
     } catch (error) {
+        log.log.run('READ_WEBPAGE', `خطا در خواندن: ${url}`, error.message, 0);
         return { success: false, error: error.message, url };
     }
 }
