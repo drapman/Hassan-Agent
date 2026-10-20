@@ -15,6 +15,7 @@ const { conversations, memory, log } = require('../database/db');
 const siteTools = require('../tools/siteTools');
 const emailTools = require('../tools/emailTools');
 const webTools = require('../tools/webTools');
+const analyticsTools = require('../tools/analyticsTools');
 
 if (!process.env.GEMINI_API_KEY) {
     console.error('❌ GEMINI_API_KEY یافت نشد! لطفاً فایل .env را تنظیم کنید.');
@@ -91,6 +92,26 @@ const toolDeclarations = [
         name: 'get_site_stats',
         description: 'دریافت آمار کلی سایت شامل تعداد کاربران، ثبت‌نام‌های جدید و ...',
         parameters: { type: 'object', properties: {} },
+    },
+    {
+        name: 'get_analytics_overview',
+        description: 'آمار کامل بازدید سایت: بازدید صفحه، بازدیدکننده یکتا، ثبت‌نام‌ها، قیف ثبت‌نام، آهنگ‌های محبوب، منابع ورود، دستگاه‌ها و خطاها. برای سوال‌هایی مثل «آمار سایت چطوره؟»، «امروز چند نفر اومدن؟» یا «چند تا ثبت‌نام داشتیم؟» از این ابزار استفاده کن.',
+        parameters: {
+            type: 'object',
+            properties: {
+                days: { type: 'number', description: 'بازه به روز: 1 (امروز)، 7، 30 یا 90. پیش‌فرض 7' },
+            },
+        },
+    },
+    {
+        name: 'get_analytics_errors',
+        description: 'لیست خطاهای واقعی کاربران سایت (پیام خطا، صفحه‌ای که خطا داده و تعداد تکرار).',
+        parameters: {
+            type: 'object',
+            properties: {
+                days: { type: 'number', description: 'بازه به روز (پیش‌فرض 7)' },
+            },
+        },
     },
 
     // ─── Email Tools ───
@@ -248,6 +269,18 @@ async function executeTool(toolName, args) {
                 return await siteTools.addUserNote(args.user_id, args.note, args.tags);
             case 'get_site_stats':
                 return await siteTools.getSiteStats();
+            case 'get_analytics_overview':
+                return await analyticsTools.getOverview(args.days || 7);
+            case 'get_analytics_errors': {
+                const res = await analyticsTools.getOverview(args.days || 7);
+                if (!res.success) return res;
+                return {
+                    success: true,
+                    days: res.days,
+                    total_errors: res.overview?.totals?.errors || 0,
+                    errors: res.overview?.errors || [],
+                };
+            }
 
             // Email Tools
             case 'get_emails':
@@ -304,6 +337,7 @@ const SYSTEM_PROMPT = `تو دستیار هوش مصنوعی شخصی من هس�
 
 قابلیت‌های تو:
 - مدیریت کاربران سایت: دیدن کاربران جدید، پیشرفت آنها، ارسال پیام
+- آمار سایت: بازدید، بازدیدکننده یکتا، ثبت‌نام، قیف ثبت‌نام، آهنگ‌های پرطرفدار، منابع ورود و خطاهای کاربران
 - بررسی ایمیل و ارسال ایمیل
 - جستجو در اینترنت و خواندن صفحات وب
 - ردیابی مرسولات پستی
@@ -321,6 +355,7 @@ const SYSTEM_PROMPT = `تو دستیار هوش مصنوعی شخصی من هس�
 4. پاسخ‌ها رو خلاصه، مفید، دقیق و خودمونی نگه دار (از پرگویی بی‌مورد بپرهیز)
 5. اگر اطلاعاتی رو در حافظه ذخیره می‌کنی، به کاربر با لحن دوستانه اطلاع بده
 6. در مورد اطلاعات حساس محتاط باش
+7. هر وقت ازت آمار سایت پرسیدن (بازدید، بازدیدکننده، ثبت‌نام، خطا، آهنگ محبوب، منبع ورود) حتماً ابزار آمار را صدا بزن و اعداد واقعی را بگو؛ هیچ‌وقت از خودت عدد نساز. بازهٔ زمانی را از حرف کاربر بفهم (امروز = ۱ روز، این هفته = ۷ روز، این ماه = ۳۰ روز).
 
 تاریخ و زمان فعلی: ${new Date().toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' })}`;
 

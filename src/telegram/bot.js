@@ -10,6 +10,7 @@ require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const { processMessage, clearSession } = require('../agent/masterAgent');
 const { initializeDatabase, memory, log } = require('../database/db');
+const { getOverview, formatOverview, formatErrors, toPlain } = require('../tools/analyticsTools');
 
 // ──────────────────────────────────────────────────
 // Validation
@@ -62,6 +63,7 @@ bot.command('start', async (ctx) => {
 📊 *مدیریت سایت:*
 • کاربران جدید و پیشرفت آنها
 • ارسال پیام به کاربران
+• آمار بازدید، ثبت‌نام، آهنگ‌های محبوب و خطاها
 
 📧 *ایمیل:*
 • بررسی صندوق ورودی
@@ -82,6 +84,7 @@ bot.command('start', async (ctx) => {
 
 مثال‌ها:
 • "کاربران جدید سایت رو نشونم بده"
+• "آمار سایت امروز چطوره؟"
 • "ایمیل‌های خوانده‌نشده رو چک کن"
 • "بلیط تهران به مشهد فردا جستجو کن"
 • "نرخ دلار چنده؟"`;
@@ -96,6 +99,8 @@ bot.command('help', async (ctx) => {
 *دستورات:*
 /start - شروع/منوی اصلی
 /help - این راهنما
+/stats - آمار بازدید، ثبت‌نام و خطاهای سایت
+/errors - خطاهای واقعی کاربران
 /clear - پاک کردن تاریخچه مکالمه
 /status - وضعیت سیستم
 /memory - مشاهده حافظه ذخیره‌شده
@@ -258,6 +263,85 @@ bot.command(['dashboard', 'app', 'panel'], async (ctx) => {
     await sendDashboardLink(ctx);
 });
 
+// ──────────────────────────────────────────────────
+// Analytics (آمار سایت) — بدون مصرف توکن هوش مصنوعی
+// ──────────────────────────────────────────────────
+
+const RANGE_BUTTONS = [
+    Markup.button.callback('امروز', 'analytics:1'),
+    Markup.button.callback('۷ روز', 'analytics:7'),
+    Markup.button.callback('۳۰ روز', 'analytics:30'),
+    Markup.button.callback('۹۰ روز', 'analytics:90'),
+];
+
+function analyticsKeyboard() {
+    return Markup.inlineKeyboard([RANGE_BUTTONS]);
+}
+
+async function sendAnalyticsReport(ctx, days = 7, { edit = false } = {}) {
+    try {
+        await ctx.sendChatAction('typing').catch(() => {});
+
+        const res = await getOverview(days);
+        if (!res.success) {
+            const text = `❌ آمار در دسترس نیست.\n${res.error}`;
+            return edit
+                ? ctx.editMessageText(text).catch(() => ctx.reply(text))
+                : ctx.reply(text);
+        }
+
+        const html = formatOverview(res.overview, days);
+        const extra = { parse_mode: 'HTML', disable_web_page_preview: true, ...analyticsKeyboard() };
+
+        if (edit) {
+            try {
+                return await ctx.editMessageText(html, extra);
+            } catch (err) {
+                const reason = String(err?.description || err?.message || '');
+                if (reason.includes('not modified')) return;
+                return await ctx.replyWithHTML(html, analyticsKeyboard())
+                    .catch(() => ctx.reply(toPlain(html)));
+            }
+        }
+
+        await ctx.replyWithHTML(html, analyticsKeyboard())
+            .catch(() => ctx.reply(toPlain(html)));
+    } catch (err) {
+        console.error('❌ خطا در ارسال گزارش آمار:', err);
+        await ctx.reply(`❌ خطا در دریافت آمار: ${err.message}`);
+    }
+}
+
+async function sendErrorsReport(ctx, days = 7) {
+    try {
+        await ctx.sendChatAction('typing').catch(() => {});
+
+        const res = await getOverview(days);
+        if (!res.success) {
+            return ctx.reply(`❌ آمار در دسترس نیست.\n${res.error}`);
+        }
+
+        const html = formatErrors(res.overview, days, 8);
+        await ctx.replyWithHTML(html, { disable_web_page_preview: true })
+            .catch(() => ctx.reply(toPlain(html)));
+    } catch (err) {
+        console.error('❌ خطا در ارسال گزارش خطاها:', err);
+        await ctx.reply(`❌ خطا در دریافت خطاها: ${err.message}`);
+    }
+}
+
+bot.command(['stats', 'analytics', 'report'], (ctx) => sendAnalyticsReport(ctx, 7));
+bot.command(['errors', 'bugs'], (ctx) => sendErrorsReport(ctx, 7));
+
+bot.hears('📊 آمار سایت', (ctx) => sendAnalyticsReport(ctx, 7));
+bot.hears('🚨 خطاها', (ctx) => sendErrorsReport(ctx, 7));
+
+bot.action(/^analytics:(\d+)$/, async (ctx) => {
+    const days = parseInt(ctx.match[1], 10) || 7;
+    await ctx.answerCbQuery().catch(() => {});
+    await sendAnalyticsReport(ctx, days, { edit: true });
+});
+
 function getMainKeyboard() {
     const webAppUrl = process.env.WEBAPP_URL;
     const rows = [];
@@ -266,6 +350,7 @@ function getMainKeyboard() {
     } else {
         rows.push(['📱 داشبورد مدیریت']);
     }
+    rows.push(['📊 آمار سایت', '🚨 خطاها']);
     rows.push(['📊 کاربران جدید', '📧 ایمیل‌ها']);
     rows.push(['💱 نرخ ارز', '✈️ بلیط']);
     rows.push(['🔄 شروع مجدد', '❓ راهنما']);

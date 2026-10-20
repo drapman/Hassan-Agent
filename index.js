@@ -28,6 +28,11 @@ async function main() {
             const { bot } = require('./src/telegram/bot');
             const { startNewUserWatcher } = require('./src/watchers/newUserWatcher');
             startNewUserWatcher(bot);
+
+            // گزارش روزانهٔ آمار + هشدار خطاهای سایت
+            const { startAnalyticsDigest, startErrorWatcher } = require('./src/tools/analyticsTools');
+            startAnalyticsDigest(bot);
+            startErrorWatcher(bot);
         } catch (error) {
             console.error('❌ خطا در اتصال به تلگرام:', error.message);
             if (error.message.includes('401')) {
