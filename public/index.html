@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=4.1">
+    <link rel="stylesheet" href="style.css?v=4.2">
 </head>
 <body>
     <div class="app-container">
@@ -351,6 +351,15 @@
                         <input type="text" id="modalNoteText" placeholder="ثبت یادداشت برای سوابق این کاربر...">
                     </div>
                     <button class="btn btn-secondary" id="saveNoteBtn">ذخیره یادداشت</button>
+
+                    <hr class="modal-divider">
+
+                    <!-- Danger Zone: delete account -->
+                    <div class="danger-zone">
+                        <h4 class="sub-title">⚠️ منطقهٔ خطر</h4>
+                        <p class="danger-hint">با حذف حساب، تمام پیشرفت این کاربر (آهنگ‌ها، کلمات لایتنر، نشان‌ها، XP و اشتراک یادآور) برای همیشه پاک می‌شود. این کار قابل بازگشت نیست.</p>
+                        <button class="btn btn-danger" id="deleteUserBtn">🗑️ حذف حساب کاربری</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -359,6 +368,6 @@
         <div class="toast-container" id="toastContainer"></div>
     </div>
 
-    <script src="app.js?v=4.1"></script>
+    <script src="app.js?v=4.2"></script>
 </body>
 </html>

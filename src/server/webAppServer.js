@@ -10,6 +10,7 @@ const siteTools = require('../tools/siteTools');
 const webTools = require('../tools/webTools');
 const analyticsTools = require('../tools/analyticsTools');
 const leaderboardTools = require('../tools/leaderboardTools');
+const userAdminTools = require('../tools/userAdminTools');
 const { siteUsers, db } = require('../database/db');
 
 // ─── Rate Limiter (ساده، ایمن و مستقل از پکیج‌های خارجی) ───
@@ -273,6 +274,27 @@ function createWebAppServer() {
         } catch (error) {
             console.error('[API /api/users/:id/note Error]:', error.message);
             res.status(500).json({ success: false, error: 'خطای داخلی در ثبت یادداشت.' });
+        }
+    });
+
+    // ۶.۵ حذف کامل حساب کاربر - فقط ادمین
+    app.delete('/api/users/:id', requireAdminAuth, async (req, res) => {
+        try {
+            const userId = String(req.params.id || '').trim();
+            if (!userAdminTools.isValidUserId(userId)) {
+                return res.status(400).json({ success: false, error: 'شناسه کاربر نامعتبر است.' });
+            }
+
+            const result = await userAdminTools.deleteUserAccount(userId);
+            if (!result.success) {
+                return res.status(400).json(result);
+            }
+
+            console.log(`[admin] حساب کاربر حذف شد: ${result.email || userId}`);
+            res.json(result);
+        } catch (error) {
+            console.error('[API DELETE /api/users/:id Error]:', error.message);
+            res.status(500).json({ success: false, error: 'خطای داخلی در حذف حساب کاربر.' });
         }
     });
 

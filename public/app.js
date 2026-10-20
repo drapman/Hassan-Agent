@@ -302,6 +302,13 @@ window.openUserModal = async function(userId) {
     if (!user) return;
 
     state.selectedUser = user;
+
+    const deleteBtn = document.getElementById('deleteUserBtn');
+    if (deleteBtn) {
+        deleteBtn.disabled = false;
+        deleteBtn.textContent = '🗑️ حذف حساب کاربری';
+    }
+
     const name = user.full_name || user.username || user.name || 'کاربر بدون نام';
     const email = user.email || 'بدون ایمیل';
     const initials = getInitials(name);
@@ -563,6 +570,64 @@ window.openUserModal = async function(userId) {
 function closeModal() {
     document.getElementById('userModal').style.display = 'none';
     state.selectedUser = null;
+}
+
+// ── حذف کامل حساب کاربر ──
+
+function confirmAction(message) {
+    const tgApp = window.Telegram?.WebApp;
+    if (tgApp && typeof tgApp.showConfirm === 'function') {
+        return new Promise((resolve) => {
+            try {
+                tgApp.showConfirm(message, (confirmed) => resolve(!!confirmed));
+            } catch (e) {
+                resolve(window.confirm(message));
+            }
+        });
+    }
+    return Promise.resolve(window.confirm(message));
+}
+
+async function deleteSelectedUser() {
+    const user = state.selectedUser;
+    if (!user) return;
+
+    const userId = user.id || user.site_user_id;
+    if (!userId) {
+        showToast('شناسه این کاربر پیدا نشد.', 'error');
+        return;
+    }
+
+    const name = user.full_name || user.username || user.name || user.email || 'این کاربر';
+    const confirmed = await confirmAction(
+        `حساب «${name}» و همهٔ پیشرفتش برای همیشه حذف شود؟\n\nاین کار قابل بازگشت نیست.`
+    );
+    if (!confirmed) return;
+
+    const btn = document.getElementById('deleteUserBtn');
+    const originalLabel = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ در حال حذف...';
+    }
+
+    try {
+        const res = await fetch(`/api/users/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'حذف حساب انجام نشد.');
+
+        closeModal();
+        showToast('حساب کاربر برای همیشه حذف شد 🗑️', 'success');
+        fetchStats();
+        fetchUsers();
+    } catch (err) {
+        showToast(err.message || 'خطا در حذف حساب کاربر', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalLabel;
+        }
+    }
 }
 
 // ──────────────────────────────────────────────────
@@ -1134,6 +1199,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('userModal').addEventListener('click', (e) => {
         if (e.target.id === 'userModal') closeModal();
     });
+
+    // حذف کامل حساب کاربر
+    const deleteUserBtn = document.getElementById('deleteUserBtn');
+    if (deleteUserBtn) {
+        deleteUserBtn.addEventListener('click', () => {
+            triggerHaptic('warning');
+            deleteSelectedUser();
+        });
+    }
 
     // ارسال پیام مستقیم به کاربر
     document.getElementById('sendMsgBtn').addEventListener('click', async () => {
